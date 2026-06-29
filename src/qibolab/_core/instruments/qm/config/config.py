@@ -18,6 +18,7 @@ from .devices import (
     Controller,
     ControllerId,
     Controllers,
+    LfFemOutput,
     ModuleTypes,
     MwFemInput,
     MwFemOutput,
@@ -30,6 +31,7 @@ from .elements import (
     AcquireOctaveElement,
     DcElement,
     Element,
+    LfFemToneElement,
     MwFemElement,
     RfOctaveElement,
 )
@@ -99,6 +101,25 @@ class Configuration:
             del values["upsampling_mode"]
         controller.analog_outputs[channel.port] = values
         self.elements[id] = DcElement.from_channel(channel)
+    
+
+    def configure_lf_fem_tone_line(
+    self,
+    id: "ChannelId",  
+    channel: "IqChannel", 
+    config: "IqConfig",    
+    ):
+        controller = self.controllers[channel.device]
+        if channel.port in controller.analog_outputs:
+            output = LfFemOutput(**controller.analog_outputs[channel.port])
+            output.update(config)                     
+        else:
+            output = LfFemOutput.from_config(config)  
+        controller.analog_outputs[channel.port] = asdict(output)
+        intermediate_frequency = int(config.frequency)
+        self.elements[id] = LfFemToneElement.from_channel(
+            channel, intermediate_frequency
+        )
 
     def configure_mw_fem_line(
         self,

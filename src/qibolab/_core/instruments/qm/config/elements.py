@@ -7,6 +7,7 @@ from qibolab._core.components import Channel
 
 __all__ = [
     "DcElement",
+    "LfFemToneElement",
     "RfOctaveElement",
     "AcquireOctaveElement",
     "MwFemElement",
@@ -130,6 +131,20 @@ MwOutput = TypedDict("MwOutput", {"port": tuple[str, int, int]})
 def _to_mw_fem_input(channel: Channel, upconverter: int):
     return _to_port(channel) | {"upconverter": upconverter}
 
+@dataclass
+class LfFemToneElement:
+    singleInput: dict
+    intermediate_frequency: int  
+    operations: dict[str, str] = field(default_factory=dict)
+ 
+    @classmethod
+    def from_channel(cls, channel, intermediate_frequency: int):
+        port = _to_port(channel) 
+        return cls(
+            singleInput=port,
+            intermediate_frequency=int(intermediate_frequency),
+        )
+
 
 @dataclass
 class MwFemElement:
@@ -179,6 +194,7 @@ class AcquireMwFemElement:
 
 Element = Union[
     DcElement,
+    LfFemToneElement,
     RfOctaveElement,
     AcquireOctaveElement,
     MwFemElement,

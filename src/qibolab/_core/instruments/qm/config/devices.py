@@ -12,6 +12,7 @@ from ..components.configs import OctaveOutputModes
 
 __all__ = [
     "ModuleTypes",
+    "LfFemOutput",
     "MwFemOutput",
     "MwFemInput",
     "OctaveOutput",
@@ -32,6 +33,24 @@ class AnalogInput:
     def from_config(cls, config: QmAcquisitionConfig):
         return cls(offset=config.offset, gain_db=config.gain)
 
+@dataclass
+class LfFemOutput:
+    offset: float = 0.0
+    sampling_rate: float = 1e9
+    output_mode: Literal["direct", "amplified"] = "direct"
+    upsampling_mode: Literal["mw", "pulse"] = "mw"
+
+    @classmethod
+    def from_config(cls, config):
+        return cls(
+            offset=getattr(config, "offset", 0.0),
+            sampling_rate=getattr(config, "sampling_rate", 1e9),
+            output_mode=getattr(config, "output_mode", "direct"),
+            upsampling_mode=getattr(config, "upsampling_mode", "mw"),
+        )
+    def update(self, config):
+        assert self.sampling_rate == getattr(config, "sampling_rate", 1e9)
+        assert self.output_mode == getattr(config, "output_mode", "direct")
 
 @dataclass
 class MwFemOutput:

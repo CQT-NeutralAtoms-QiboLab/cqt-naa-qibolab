@@ -381,13 +381,16 @@ class QmController(Controller):
 
         elif isinstance(ch, IqChannel):
             assert isinstance(config, IqConfig)
-            assert ch.lo is not None
-            lo_config = configs[ch.lo]
-            assert isinstance(lo_config, OscillatorConfig)
-            if isinstance(lo_config, MwFemOscillatorConfig):
-                self.config.configure_mw_fem_line(ch, config, lo_config, channel)
+            if ch.lo is None:
+                # LF-FEM: no external LO, frequency is set directly as the NCO frequency
+                self.config.configure_lf_fem_tone_line(channel, ch, config)
             else:
-                self.config.configure_iq_line(ch, config, lo_config, channel)
+                lo_config = configs[ch.lo]
+                assert isinstance(lo_config, OscillatorConfig)
+                if isinstance(lo_config, MwFemOscillatorConfig):
+                    self.config.configure_mw_fem_line(ch, config, lo_config, channel)
+                else:
+                    self.config.configure_iq_line(ch, config, lo_config, channel)
 
         elif isinstance(ch, AcquisitionChannel):
             assert ch.probe is not None
