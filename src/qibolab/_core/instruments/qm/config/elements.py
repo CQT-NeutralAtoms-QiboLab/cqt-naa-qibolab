@@ -191,12 +191,48 @@ class AcquireMwFemElement:
             smearing=smearing,
         )
 
-
+@dataclass
+class DigitalElement:
+    """QUA element for a TTL/digital output (AOM gate, trigger line).
+ 
+    CONTRAST with LfFemToneElement / DcElement:
+      • uses `digitalInputs` (digital routing) — NOT singleInput (analog port)
+      • has NO intermediate_frequency — TTL is on/off, no frequency
+      • the operations still map names → pulses (the pulse carries the marker)
+    """
+    digitalInputs: dict
+    """The digital output routing: which digital port this element drives,
+    with optional delay/buffer. Shape mirrors the existing OutputSwitch usage:
+        {"trigger": {"port": (con, fem, port), "delay": 0, "buffer": 0}}
+    """
+    operations: dict[str, str] = field(default_factory=dict)
+    """Maps operation names → pulse names, same as other elements. The PULSE
+    references a digital_waveform via its digital_marker."""
+ 
+    @classmethod
+    def from_channel(cls, channel):
+        """Build the digital element from a DigitalChannel.
+ 
+        CONTRAST with LfFemToneElement.from_channel:
+          • wraps the port in digitalInputs (digital), not singleInput (analog)
+          • passes NO frequency
+        """
+        port = _to_port(channel)["port"]  # noqa: F821  (con, fem, port) tuple
+        return cls(
+            digitalInputs={
+                "trigger": {
+                    "port": port,
+                    "delay": getattr(channel, "delay", 0),
+                    "buffer": getattr(channel, "buffer", 0),
+                }
+            },
+        )
 Element = Union[
     DcElement,
     LfFemToneElement,
     RfOctaveElement,
     AcquireOctaveElement,
+    DigitalElement,
     MwFemElement,
     AcquireMwFemElement,
 ]

@@ -23,7 +23,7 @@ from typing import Optional
 from ..identifier import ChannelId
 from ..serialize import Model
 
-__all__ = ["Channel", "DcChannel", "IqChannel", "AcquisitionChannel"]
+__all__ = ["Channel", "DcChannel", "IqChannel", "AcquisitionChannel", "DigitalChannel"]
 
 
 class Channel(Model):
@@ -88,3 +88,14 @@ class AcquisitionChannel(Channel):
     FIXME: This is temporary solution to be able to relate acquisition channel to corresponding probe channel wherever needed in drivers,
     until we make acquire channels completely independent, and users start putting explicit acquisition commands in pulse sequence.
     """
+
+class DigitalChannel(Channel):
+    """Channel for TTL/digital signals (AOM gating, instrument triggers).
+ 
+    Inherits `device` and `path` from Channel (the port addressing).
+    Unlike IqChannel it has NO mixer/lo (digital, not RF).
+    Unlike DcChannel it routes to digital_outputs, not analog_outputs.
+ 
+    """
+    delay: int = 0
+    buffer: int = 0

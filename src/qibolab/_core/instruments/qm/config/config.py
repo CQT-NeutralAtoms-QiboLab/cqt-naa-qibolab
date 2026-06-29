@@ -31,6 +31,7 @@ from .elements import (
     AcquireOctaveElement,
     DcElement,
     Element,
+    DigitalElement,
     LfFemToneElement,
     MwFemElement,
     RfOctaveElement,
@@ -302,3 +303,69 @@ class Configuration:
 
     def register_integration_weights(self, element: str, duration: int, kernel):
         self.integration_weights.update(integration_weights(element, duration, kernel))
+
+    
+    def configure_digital_line(self, id, channel):
+        """Configure a TTL/digital output line (AOM gate / trigger).
+    
+        CONTRAST with configure_lf_fem_tone_line:
+        • writes digital_outputs (not analog_outputs)
+        • creates a DigitalElement (not LfFemToneElement)
+        • NO frequency computation (TTL has none)
+        • NO output 'offset/rate/mode' config — a digital port is just on/off
+    
+        Args:
+        id      : ChannelId — element name, e.g. "0/aom_gate" or "0/artiq_trigger"
+        channel : DigitalChannel — carries .device ("con1/1") and .port
+        """
+        # 1. Resolve the FEM (same mechanism as analog).
+        controller = self.controllers[channel.device]
+    
+        # 2. Register the DIGITAL output port. digital_outputs already exists on
+        #    Controller; an empty dict per port is the minimal registration.
+        controller.digital_outputs[channel.port] = {}
+    
+        # 3. Create the digital element (digitalInputs routing, no frequency).
+        self.elements[id] = DigitalElement.from_channel(channel)
+    
+ 
+def register_digital_waveform(self, name, samples):
+    """Register a TTL on/off pattern in digital_waveforms.
+ 
+    Args:
+      name    : str — the marker name (referenced by a pulse's digital_marker)
+      samples : list[tuple[int, int]] — (value, duration_ns) pairs.
+                value is 1 (high) or 0 (low); duration in ns; duration 0 means
+                "hold to the end of the pulse".
+                e.g. [(1, 0)]        → stay HIGH the whole pulse (the default "ON")
+                     [(1, 200)]      → HIGH for 200 ns
+                     [(0, 50),(1,100)] → LOW 50 ns then HIGH 100 ns
+ 
+    CONTRAST with analog waveforms_from_pulse: that builds VOLTAGE samples;
+    this builds (value, duration) on/off pairs — there are no voltage levels,
+    only HIGH/LOW timing.
+    """
+    self.digital_waveforms[name] = {"samples": samples}
+ 
+ 
+def register_digital_pulse(self, element, length, marker_name="ON"):
+    """Register a digital pulse and attach it to an element's operations.
+ 
+    A digital pulse has a length and a digital_marker (which on/off pattern).
+    QmPulse already supports digital_marker — we just build one with no analog
+    waveform (or an empty one), driven purely by the marker.
+ 
+    CONTRAST with register_iq_pulse/register_dc_pulse: those build analog
+    waveforms; this one is digital-only (the marker is the signal).
+    """
+    op = f"digital_{element}"
+    # QmPulse already has digital_marker (default "ON"); for a pure digital
+    # pulse the waveform may be empty/zero and the marker carries the signal.
+    self.pulses[op] = {
+        "operation": "control",
+        "length": length,
+        "digital_marker": marker_name,   # ← links to digital_waveforms[marker_name]
+        # "waveforms": {...}  # often omitted or zero for a pure trigger
+    }
+    self.elements[element].operations[op] = op
+    return op  
