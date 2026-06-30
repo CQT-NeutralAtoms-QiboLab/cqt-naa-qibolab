@@ -233,6 +233,8 @@ class Parameters(Model):
         PlainSerializer(_dump_configs),
     ] = Field(default_factory=dict)
     native_gates: NativeGates = Field(default_factory=NativeGates)
+    pulses: dict[ComponentId, Pulse] = Field(default_factory=dict)
+    """Pulses addressed directly by channel id, bypassing qubits/native gates."""
 
     def replace(self, update: Update) -> "Parameters":
         """Update parameters' values."""
