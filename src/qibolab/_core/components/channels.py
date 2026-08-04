@@ -74,7 +74,11 @@ class IqChannel(Channel):
 
     None, if the channel does not have an LO, or it is not configurable.
     """
-
+    core: Optional[str] = None
+    """Name of the core component corresponding to this channel.
+    
+    None, if the channel does not have a core, or it is not configurable.
+    """
 
 class AcquisitionChannel(Channel):
     twpa_pump: Optional[str] = None

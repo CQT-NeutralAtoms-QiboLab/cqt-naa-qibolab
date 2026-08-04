@@ -1,5 +1,5 @@
 from dataclasses import dataclass, field
-from typing import Union
+from typing import Optional, Union
 
 from typing_extensions import TypedDict
 
@@ -136,6 +136,7 @@ class LfFemToneElement:
     singleInput: dict
     intermediate_frequency: int  
     operations: dict[str, str] = field(default_factory=dict)
+    core: Optional[str] = None
  
     @classmethod
     def from_channel(cls, channel, intermediate_frequency: int):
@@ -143,6 +144,7 @@ class LfFemToneElement:
         return cls(
             singleInput=port,
             intermediate_frequency=int(intermediate_frequency),
+            core=getattr(channel, "core", None)
         )
 
 

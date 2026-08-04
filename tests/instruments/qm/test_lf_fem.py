@@ -287,7 +287,7 @@ class TestNeutralAtomPlatform:
             if ch_id in configs:
                 controller.configure_channel(ch_id, configs)
 
-        qua_config = asdict(controller.config)
+        qua_config = self.config.asdict()
 
         out = pathlib.Path(__file__).parent / "generated_qua_config.json"
         out.write_text(json.dumps(qua_config, indent=2, default=str))

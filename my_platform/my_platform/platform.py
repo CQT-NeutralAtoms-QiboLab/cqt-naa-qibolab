@@ -11,7 +11,7 @@ FOLDER = pathlib.Path(__file__).parent
 # FEM slot assignments matching reference config (configuration_opx1000_mwfem_lffem.py)
 CON = "con1"
 LF_FEM1 = 1    # LF-FEM: col AOD (port 1) + row AOD (port 2) + readout + trigger
-LF_FEM2 = 5    # LF-FEM: spare / additional DC outputs
+LF_FEM2 = 2    # LF-FEM: spare / additional DC outputs
 
 # Analog output ports on LF_FEM1 (matching reference)
 COL_CHANNEL = 1
@@ -51,7 +51,7 @@ def create() -> Platform:
 
     instruments = {
         CON: QmController(
-            address="192.168.1.100:80",
+            address="192.168.88.249",
             fems={
                 f"{CON}/{LF_FEM1}": "LF",
                 f"{CON}/{LF_FEM2}": "LF",

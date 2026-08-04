@@ -16,6 +16,7 @@ from qibolab._core.components import (
     AcquisitionChannel,
     Config,
     DcChannel,
+    DigitalChannel,
     IqChannel,
     IqConfig,
     OscillatorConfig,
@@ -379,6 +380,9 @@ class QmController(Controller):
             assert isinstance(config, OpxOutputConfig)
             self.config.configure_dc_line(channel, ch, config)
 
+        elif isinstance(ch, DigitalChannel):
+            self.config.configure_digital_line(channel, ch)
+
         elif isinstance(ch, IqChannel):
             assert isinstance(config, IqConfig)
             if ch.lo is None:
@@ -663,7 +667,7 @@ class QmController(Controller):
                 qua_program = program(args, options, sweepers)
 
                 if self.script_file_name is not None:
-                    script = generate_qua_script(qua_program, asdict(self.config))
+                    script = generate_qua_script(qua_program, self.config.asdict())
                     with open(self.script_file_name, "w") as file:
                         file.write(script)
 
@@ -671,9 +675,9 @@ class QmController(Controller):
                     warnings.warn(
                         "Not connected to Quantum Machines. Returning program and config."
                     )
-                    return {"program": qua_program, "config": asdict(self.config)}
+                    return {"program": qua_program, "config": self.config.asdict()}
 
-                machine = self.manager.open_qm(asdict(self.config))
+                machine = self.manager.open_qm(self.config.asdict())
                 program_id = machine.compile(qua_program)
                 self.cache = Cache(
                     machine=machine, program_id=program_id, acquisitions=acquisitions
