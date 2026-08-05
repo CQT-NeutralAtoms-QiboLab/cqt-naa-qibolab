@@ -33,7 +33,7 @@ from .execution_parameters import ConfigUpdate, ExecutionParameters, Update
 from .identifier import ChannelId, QubitId, QubitPairId
 from .instruments.abstract import Instrument, InstrumentId
 from .native import Native, NativeContainer, SingleQubitNatives, TwoQubitNatives
-from .pulses import Acquisition, Pulse, Readout, Rectangular
+from .pulses import Acquisition, Pulse, Readout, Rectangular, Ttl
 from .qubits import Qubit
 from .serialize import Model, replace
 
@@ -233,7 +233,9 @@ class Parameters(Model):
         PlainSerializer(_dump_configs),
     ] = Field(default_factory=dict)
     native_gates: NativeGates = Field(default_factory=NativeGates)
-    pulses: dict[ComponentId, Pulse] = Field(default_factory=dict)
+    pulses: dict[
+        ComponentId, Annotated[Union[Pulse, Ttl], Field(discriminator="kind")]
+    ] = Field(default_factory=dict)
     """Pulses addressed directly by channel id, bypassing qubits/native gates."""
 
     def replace(self, update: Update) -> "Parameters":

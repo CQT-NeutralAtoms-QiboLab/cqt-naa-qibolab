@@ -354,17 +354,18 @@ class Configuration:
         self.digital_waveforms[name] = {"samples": samples}
     
     
-    def register_digital_pulse(self, element, length, marker_name="ON"):
+    def register_digital_pulse(self, element, pulse, marker_name="ON"):
         """Register a digital pulse and attach it to an element's operations.
-    
+
         A digital pulse has a length and a digital_marker (which on/off pattern).
         QmPulse already supports digital_marker — we just build one with no analog
         waveform (or an empty one), driven purely by the marker.
-    
+
         CONTRAST with register_iq_pulse/register_dc_pulse: those build analog
         waveforms; this one is digital-only (the marker is the signal).
         """
-        op = f"digital_{element}"
+        op = operation(pulse)
+        length = int(pulse.duration)
         # QmPulse already has digital_marker (default "ON"); for a pure digital
         # pulse the waveform may be empty/zero and the marker carries the signal.
         self.pulses[op] = {

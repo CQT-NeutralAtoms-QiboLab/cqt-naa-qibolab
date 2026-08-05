@@ -4,7 +4,7 @@ from qm import qua
 from qm.qua import declare, fixed, for_
 
 from qibolab._core.execution_parameters import AcquisitionType, ExecutionParameters
-from qibolab._core.pulses import Align, Delay, Pulse, Readout, VirtualZ
+from qibolab._core.pulses import Align, Delay, Pulse, Readout, VirtualZ, Ttl
 from qibolab._core.sweeper import ParallelSweepers, Parameter, Sweeper
 
 from ..config import operation
@@ -37,6 +37,9 @@ def _virtualz(pulse: VirtualZ, element: str, parameters: Parameters):
         else normalize_phase(pulse.phase)
     )
     qua.frame_rotation_2pi(phase, element)
+
+def _ttl(op: str, element: str, parameters: Parameters):
+    qua.play(op, element)
 
 
 def _play_multiple_waveforms(element: str, parameters: Parameters):
@@ -125,6 +128,8 @@ def play(args: ExecutionArguments):
             _delay(pulse, element, params)
         elif isinstance(pulse, VirtualZ):
             _virtualz(pulse, element, params)
+        elif isinstance(pulse, Ttl):
+            _ttl(op, element, params)
         elif isinstance(pulse, Align) and pulse.id not in processed_aligns:
             channel_ids = args.sequence.pulse_channels(pulse.id)
             qua.align(*(str(ch) for ch in channel_ids))

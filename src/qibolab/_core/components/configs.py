@@ -21,6 +21,7 @@ __all__ = [
     "DcConfig",
     "IqConfig",
     "AcquisitionConfig",
+    "DigitalConfig",
     "IqMixerConfig",
     "OscillatorConfig",
     "Config",
@@ -60,6 +61,17 @@ class DcConfig(Config):
         if len(feedforward_coeff) == 0:
             return []
         return reduce(np.convolve, feedforward_coeff)
+
+class DigitalConfig(Config):
+    """Configuration for a channel that can be used to send digital pulses"""
+
+    kind: Literal["digital"] = "digital"
+
+    delay: float
+    """Delay of the digital channel in nanoseconds."""
+
+    buffer: float
+    """Buffer of the digital channel in nanoseconds."""
 
 
 class OscillatorConfig(Config):
@@ -140,5 +152,5 @@ class LogConfig(Config):
 
 
 ChannelConfig = Union[
-    DcConfig, IqMixerConfig, OscillatorConfig, IqConfig, AcquisitionConfig, LogConfig
+    DcConfig, DigitalConfig, IqMixerConfig, OscillatorConfig, IqConfig, AcquisitionConfig, LogConfig
 ]

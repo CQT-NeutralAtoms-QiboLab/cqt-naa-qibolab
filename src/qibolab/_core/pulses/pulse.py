@@ -17,6 +17,7 @@ __all__ = [
     "PulseId",
     "PulseLike",
     "Readout",
+    "Ttl",
     "VirtualZ",
 ]
 
@@ -195,8 +196,16 @@ class Align(_PulseLike):
 
     kind: Literal["align"] = "align"
 
+class Ttl(_PulseLike):
+    """Digital TTL Pulse"""
+
+    kind: Literal["ttl"] = "ttl"
+
+    duration: float
+    """Duration in ns."""
+
 
 PulseLike = Annotated[
-    Union[Align, Pulse, Delay, VirtualZ, Acquisition, Readout],
+    Union[Align, Pulse, Delay, VirtualZ, Acquisition, Readout, Ttl],
     Field(discriminator="kind"),
 ]

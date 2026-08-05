@@ -24,7 +24,7 @@ from qibolab._core.components import (
 from qibolab._core.execution_parameters import ExecutionParameters
 from qibolab._core.identifier import ChannelId
 from qibolab._core.instruments.abstract import Controller
-from qibolab._core.pulses import Align, Delay, Pulse, Readout
+from qibolab._core.pulses import Align, Delay, Pulse, Readout, Ttl
 from qibolab._core.pulses.envelope import Rectangular
 from qibolab._core.sequence import PulseSequence
 from qibolab._core.serialize import Model
@@ -448,7 +448,7 @@ class QmController(Controller):
         return probe_map
 
     def register_pulse(
-        self, channel: ChannelId, config: Config, pulse: Union[Pulse, Readout]
+        self, channel: ChannelId, config: Config, pulse: Union[Pulse, Readout, Ttl]
     ) -> str:
         """Add pulse in the QM ``config``.
 
@@ -462,6 +462,9 @@ class QmController(Controller):
             return self.config.register_dc_pulse(
                 channel, pulse, sampling_rate, max_voltage
             )
+        if isinstance(ch, DigitalChannel):
+            assert isinstance(pulse, Ttl)
+            return self.config.register_digital_pulse(channel, pulse)
         if isinstance(ch, IqChannel):
             assert isinstance(pulse, Pulse)
             return self.config.register_iq_pulse(
@@ -483,6 +486,8 @@ class QmController(Controller):
             if isinstance(pulse, Pulse):
                 self.register_pulse(id, configs[id], pulse)
             elif isinstance(pulse, Readout):
+                self.register_pulse(id, configs[id], pulse)
+            elif isinstance(pulse, Ttl):
                 self.register_pulse(id, configs[id], pulse)
 
     def register_duration_sweeper_pulses(
