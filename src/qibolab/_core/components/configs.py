@@ -113,6 +113,12 @@ class IqConfig(Config):
     frequency: float
     """The carrier frequency of the channel."""
 
+    offset: float = 0.0
+    """The DC offset of the channel."""
+
+    sampling_rate: int = 1_000_000_000
+    """The sampling rate of the channel."""
+
 
 class AcquisitionConfig(Config):
     """Configuration for acquisition channel.

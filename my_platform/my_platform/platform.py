@@ -1,7 +1,7 @@
 import pathlib
 
 from qibolab import ConfigKinds
-from qibolab._core.components import DigitalChannel, IqChannel
+from qibolab._core.components import AcquisitionChannel, DigitalChannel, IqChannel
 from qibolab._core.instruments.qm import QmController
 from qibolab._core.instruments.qm.components import OpxOutputConfig, QmAcquisitionConfig
 from qibolab._core.platform import Platform
@@ -24,7 +24,7 @@ TRIG_CHANNELS = [3, 4]
 # Number of tweezers per axis (reference uses 8; 3 here for testing)
 N_TWEEZERS = 3
 
-# ConfigKinds.extend([OpxOutputConfig, QmAcquisitionConfig])
+ConfigKinds.extend([OpxOutputConfig, QmAcquisitionConfig])
 
 
 def create() -> Platform:
@@ -62,6 +62,13 @@ def create() -> Platform:
             device=f"{CON}/{LF_FEM1}",
             path=str(port),
         )
+    channels["detector"] = AcquisitionChannel(
+        device=f"{CON}/{LF_FEM1}", path="2", probe="col_selector_01"
+    )
+    channels["loopback"] = AcquisitionChannel(
+        device=f"{CON}/{LF_FEM1}", path="2", probe="col_selector_01"
+    )
+
 
     instruments = {
         CON: QmController(

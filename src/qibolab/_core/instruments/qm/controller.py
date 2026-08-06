@@ -403,27 +403,32 @@ class QmController(Controller):
             probe_config = configs[ch.probe]
             assert isinstance(probe, IqChannel)
             assert isinstance(probe_config, IqConfig)
-            assert probe.lo is not None
-            lo_config = configs[probe.lo]
-            assert isinstance(lo_config, OscillatorConfig)
-            if isinstance(lo_config, MwFemOscillatorConfig):
-                self.config.configure_mw_fem_acquire_line(
-                    ch,
-                    probe,
-                    config,
-                    probe_config,
-                    lo_config,
-                    channel,
+            if probe.lo is None:
+                # LF-FEM: no external LO, bare analog input/output
+                self.config.configure_lf_fem_acquire_line(
+                    channel, ch, probe, config, probe_config
                 )
             else:
-                self.config.configure_acquire_line(
-                    ch,
-                    probe,
-                    config,
-                    probe_config,
-                    lo_config,
-                    channel,
-                )
+                lo_config = configs[probe.lo]
+                assert isinstance(lo_config, OscillatorConfig)
+                if isinstance(lo_config, MwFemOscillatorConfig):
+                    self.config.configure_mw_fem_acquire_line(
+                        ch,
+                        probe,
+                        config,
+                        probe_config,
+                        lo_config,
+                        channel,
+                    )
+                else:
+                    self.config.configure_acquire_line(
+                        ch,
+                        probe,
+                        config,
+                        probe_config,
+                        lo_config,
+                        channel,
+                    )
             return ch.probe
 
         else:
@@ -471,8 +476,9 @@ class QmController(Controller):
                 channel, pulse, sampling_rate, max_voltage
             )
         assert isinstance(pulse, Readout)
+        probe = self.channels[ch.probe]
         return self.config.register_acquisition_pulse(
-            channel, pulse, sampling_rate, max_voltage
+            channel, pulse, sampling_rate, max_voltage, dc=probe.lo is None
         )
 
     def register_pulses(self, configs: dict[str, Config], sequence: PulseSequence):
@@ -576,10 +582,11 @@ class QmController(Controller):
                 continue
 
             probe_id = self.channels[channel_id].probe
+            probe = self.channels[probe_id]
             max_voltage = channel_max_voltage(configs[probe_id])
             sampling_rate = channel_sampling_rate(configs[probe_id])
             op = self.config.register_acquisition_pulse(
-                channel_id, readout, sampling_rate, max_voltage
+                channel_id, readout, sampling_rate, max_voltage, dc=probe.lo is None
             )
 
             acq_config = configs[channel_id]

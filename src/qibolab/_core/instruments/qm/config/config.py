@@ -16,6 +16,7 @@ from qibolab._core.pulses import Custom, Pulse, Readout
 
 from ..components import MwFemOscillatorConfig, OpxOutputConfig, QmAcquisitionConfig
 from .devices import (
+    AnalogInput,
     Controller,
     ControllerId,
     Controllers,
@@ -28,6 +29,7 @@ from .devices import (
     OctaveOutput,
 )
 from .elements import (
+    AcquireLfFemToneElement,
     AcquireMwFemElement,
     AcquireOctaveElement,
     DcElement,
@@ -129,6 +131,24 @@ class Configuration:
             channel, intermediate_frequency
         )
 
+    def configure_lf_fem_acquire_line(
+        self,
+        id: "ChannelId",  
+        acquire_channel: "AcquisitionChannel", 
+        probe_channel: "IqChannel", 
+        acquire_config: "QmAcquisitionConfig",    
+        probe_config: "IqConfig",    
+    ):
+        controller = self.controllers[acquire_channel.device]
+        controller.analog_inputs[acquire_channel.port] = AnalogInput.from_config(acquire_config)
+        self.configure_lf_fem_tone_line(id, probe_channel, probe_config)
+        intermediate_frequency = 0
+        time_of_flight = int(acquire_config.delay)
+        smearing = int(acquire_config.smearing)
+        self.elements[id] = AcquireLfFemToneElement.from_channel(
+            probe_channel, acquire_channel, intermediate_frequency, time_of_flight, smearing
+        )
+
     def configure_mw_fem_line(
         self,
         channel: IqChannel,
@@ -227,7 +247,11 @@ class Configuration:
         dc: bool = False,
     ):
         if dc:
-            qmpulse = QmPulse.from_dc_pulse(pulse, sampling_rate)
+            qmpulse = (
+                QmPulse.from_dc_pulse(pulse, sampling_rate)
+                if element is None
+                else QmAcquisition.from_dc_pulse(pulse, sampling_rate)
+            )
         else:
             if element is None:
                 qmpulse = QmPulse.from_pulse(pulse, sampling_rate)
@@ -262,7 +286,12 @@ class Configuration:
         return op
 
     def register_acquisition_pulse(
-        self, element: str, readout: Readout, sampling_rate: int, max_voltage: float
+        self,
+        element: str,
+        readout: Readout,
+        sampling_rate: int,
+        max_voltage: float,
+        dc: bool = False,
     ):
         """Registers pulse, waveforms and integration weights in QM config."""
         op = operation(readout)
@@ -304,6 +333,7 @@ class Configuration:
                 sampling_rate,
                 max_voltage,
                 element,
+                dc=dc,
             )
         self.elements[element].operations[op] = acquisition
         return op

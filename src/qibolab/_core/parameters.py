@@ -234,7 +234,7 @@ class Parameters(Model):
     ] = Field(default_factory=dict)
     native_gates: NativeGates = Field(default_factory=NativeGates)
     pulses: dict[
-        ComponentId, Annotated[Union[Pulse, Ttl], Field(discriminator="kind")]
+        ComponentId, Annotated[Union[Pulse, Ttl, Readout], Field(discriminator="kind")]
     ] = Field(default_factory=dict)
     """Pulses addressed directly by channel id, bypassing qubits/native gates."""
 

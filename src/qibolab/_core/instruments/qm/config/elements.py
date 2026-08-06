@@ -8,6 +8,7 @@ from qibolab._core.components import Channel
 __all__ = [
     "DcElement",
     "LfFemToneElement",
+    "AcquireLfFemToneElement",
     "RfOctaveElement",
     "AcquireOctaveElement",
     "MwFemElement",
@@ -147,7 +148,34 @@ class LfFemToneElement:
             core=getattr(channel, "core", None)
         )
 
+@dataclass
+class AcquireLfFemToneElement:
+    singleInput: dict
+    outputs: dict
+    intermediate_frequency: int  
+    time_of_flight: int = 24
+    smearing: int = 0
+    operations: dict[str, str] = field(default_factory=dict)
+    core: Optional[str] = None
 
+    @classmethod
+    def from_channel(
+        cls,
+        probe_channel: Channel,
+        acquire_channel: Channel,
+        intermediate_frequency: int,
+        time_of_flight: int,
+        smearing: int,
+    ):
+        return cls(
+            singleInput=_to_port(probe_channel),
+            outputs={"out1": _to_port(acquire_channel)["port"]},
+            intermediate_frequency=int(intermediate_frequency),
+            time_of_flight=time_of_flight,
+            smearing=smearing,
+            core=getattr(probe_channel, "core", None)
+        )
+    
 @dataclass
 class MwFemElement:
     MWInput: MwInput
@@ -213,6 +241,7 @@ class DigitalElement:
 Element = Union[
     DcElement,
     LfFemToneElement,
+    AcquireLfFemToneElement,
     RfOctaveElement,
     AcquireOctaveElement,
     DigitalElement,
