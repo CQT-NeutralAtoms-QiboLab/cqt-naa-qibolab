@@ -72,7 +72,7 @@ def create() -> Platform:
 
     instruments = {
         CON: QmController(
-            address="192.168.88.249",
+            address="192.168.88.247:80",
             fems={
                 f"{CON}/{LF_FEM1}": "LF",
                 f"{CON}/{LF_FEM2}": "LF",
@@ -118,7 +118,6 @@ def build_config(platform: Platform) -> dict:
 if __name__ == "__main__":
     import json
 
-    from qibolab._core.execution_parameters import ExecutionParameters
     from qibolab._core.pulses import Pulse, Rectangular
     from qibolab._core.sequence import PulseSequence
 
@@ -135,10 +134,10 @@ if __name__ == "__main__":
 
     # Option A: re-use the pulse defined in parameters.json
     # (platform.parameters.pulses is the dict loaded from the json)
-    col1_pulse = platform.parameters.pulses["col_selector_01"].model_copy(
-        update={"chirp": (1e6, "Hz/nsec")}
-    )
-    sequence.append(("col_selector_01", col1_pulse))
+    # col1_pulse = platform.parameters.pulses["col_selector_01"].model_copy(
+    #     update={"chirp": (1e6, "Hz/nsec")}
+    # )
+    # sequence.append(("col_selector_01", col1_pulse))
 
     # Option B: build a fresh Pulse inline
     col2_pulse = Pulse(
@@ -149,13 +148,8 @@ if __name__ == "__main__":
     )
     sequence.append(("col_selector_02", col2_pulse))
 
-    # Fire them on a few tones in parallel
-    sequence.append(("row_selector_01", platform.parameters.pulses["row_selector_01"]))
+    # # Fire them on a few tones in parallel
+    # sequence.append(("row_selector_01", platform.parameters.pulses["row_selector_01"]))
 
-    options = ExecutionParameters(
-        nshots=200,
-        relaxation_time=500_000,
-    )
-
-    results = platform.execute([sequence], options)
+    results = platform.execute([sequence], nshots=200, relaxation_time=500_000)
     platform.disconnect()

@@ -473,7 +473,7 @@ class QmController(Controller):
         if isinstance(ch, IqChannel):
             assert isinstance(pulse, Pulse)
             return self.config.register_iq_pulse(
-                channel, pulse, sampling_rate, max_voltage
+                channel, pulse, sampling_rate, max_voltage, dc=ch.lo is None
             )
         assert isinstance(pulse, Readout)
         probe = self.channels[ch.probe]

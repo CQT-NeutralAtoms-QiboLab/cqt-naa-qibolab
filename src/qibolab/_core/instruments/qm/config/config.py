@@ -266,11 +266,18 @@ class Configuration:
         return qmpulse
 
     def register_iq_pulse(
-        self, element: str, pulse: Pulse, sampling_rate: int, max_voltage: float
+        self,
+        element: str,
+        pulse: Pulse,
+        sampling_rate: int,
+        max_voltage: float,
+        dc: bool = False,
     ):
         op = operation(pulse)
         if op not in self.pulses:
-            self.pulses[op] = self.register_waveforms(pulse, sampling_rate, max_voltage)
+            self.pulses[op] = self.register_waveforms(
+                pulse, sampling_rate, max_voltage, dc=dc
+            )
         self.elements[element].operations[op] = op
         return op
 
