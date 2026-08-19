@@ -1,7 +1,6 @@
 """Plotting tools for pulses and related entities."""
 
 from collections import defaultdict
-from typing import Optional
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -38,7 +37,7 @@ def waveform(wf: Waveform, filename=None):
     plt.close()
 
 
-def pulse(pulse_: Pulse, freq: Optional[float] = None, filename: Optional[str] = None):
+def pulse(pulse_: Pulse, freq: float | None = None, filename: str | None = None):
     """Plot the pulse envelope and modulated waveforms.
 
     Args:
@@ -176,9 +175,9 @@ def sequence(ps: PulseSequence, freq: dict[str, float], filename=None):
                         np.array(envelope), freq[ch], rate=SAMPLING_RATE
                     )
                     ax.plot(time, modulated[1], c="lightgrey")
-                    ax.plot(time, modulated[0], c=f"C{str(n)}")
-                ax.plot(time, pulse.i(SAMPLING_RATE), c=f"C{str(n)}")
-                ax.plot(time, -pulse.i(SAMPLING_RATE), c=f"C{str(n)}")
+                    ax.plot(time, modulated[0], c=f"C{n!s}")
+                ax.plot(time, pulse.i(SAMPLING_RATE), c=f"C{n!s}")
+                ax.plot(time, -pulse.i(SAMPLING_RATE), c=f"C{n!s}")
                 # TODO: if they overlap use different shades
                 ax.axhline(0, c="dimgrey")
                 ax.set_ylabel(f"channel {ch}")

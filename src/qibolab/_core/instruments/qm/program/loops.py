@@ -1,12 +1,11 @@
 import warnings
-from typing import Union
 
 import numpy as np
 import numpy.typing as npt
 from qm.qua import Cast, Variable
 
 
-def from_array(var: Variable, array: Union[npt.NDArray, list]):
+def from_array(var: Variable, array: npt.NDArray | list):
     """Function parametrizing the QUA `for_` loop from a python array.
 
     Taken from qualang_tools to avoid the dependency.
@@ -27,13 +26,13 @@ def from_array(var: Variable, array: Union[npt.NDArray, list]):
         return var, array[0], var <= array[0], var + 1
     # Check QUA vs python variables
     if not isinstance(var, Variable):
-        raise Exception("The first argument must be a QUA variable.")
+        raise TypeError("The first argument must be a QUA variable.")
     if (not isinstance(array[0], (np.generic, int, float))) or (
         isinstance(array[0], bool)
     ):
-        raise Exception("The array must be an array of python variables.")
+        raise TypeError("The array must be an array of python variables.")
     # Check array increment
-    if np.isclose(np.std(np.diff(array)), 0):
+    if np.isclose(np.diff(array).std() / np.abs(array).mean(), 0):
         increment = "lin"
     elif np.isclose(np.std(array[1:] / array[:-1]), 0, atol=1e-3):
         increment = "log"
@@ -98,7 +97,7 @@ def from_array(var: Variable, array: Union[npt.NDArray, list]):
                 "When using logarithmic increments with QUA integers, the resulting values will slightly differ from the ones in numpy.logspace() because of rounding errors. \n Please use the get_equivalent_log_array() function to get the exact values taken by the QUA variable and note that the number of points may also change."
             )
             if step > 1:
-                if int(round(start) * float(step)) == int(round(start)):
+                if int(round(start) * float(step)) == round(start):
                     raise ValueError(
                         "Two successive values in the scan are equal after being cast to integers which will make the QUA for_ loop fail. \nEither increase the logarithmic step or use for_each_(): https://docs.quantum-machines.co/1.1.6/qm-qua-sdk/docs/Guides/features/?h=for_ea#for_each."
                     )

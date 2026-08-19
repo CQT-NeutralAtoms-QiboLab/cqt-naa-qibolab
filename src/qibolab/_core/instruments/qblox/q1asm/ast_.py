@@ -2,7 +2,8 @@ import inspect
 import re
 import shutil
 import textwrap
-from typing import Annotated, Any, Iterable, Optional, Sequence, Union
+from collections.abc import Iterable, Sequence
+from typing import Annotated, Any
 
 from pydantic import (
     AfterValidator,
@@ -36,7 +37,7 @@ class Register(Model):
         elif isinstance(data, dict):
             num = data["number"]
         else:
-            raise ValueError(f"Register not recognized '{data}'")
+            raise ValueError(f"Register not recognized '{data}'")  # noqa: TRY004
 
         assert 0 <= num < 64
         return {"number": num}
@@ -75,8 +76,8 @@ MultiBaseInt = Annotated[
     BeforeValidator(lambda n: int(n, 0) if isinstance(n, str) else n),
     BeforeValidator(lambda n: _value_bounds(n) if isinstance(n, int) else n),
 ]
-Immediate = Union[MultiBaseInt, Reference]
-Value = Union[Register, Immediate]
+Immediate = MultiBaseInt | Reference
+Value = Register | Immediate
 
 CAMEL_TO_SNAKE = re.compile("(?<=[a-z0-9])(?=[A-Z])(?!^)(?=[A-Z][a-z])")
 
@@ -124,7 +125,7 @@ class Instr(Model):
             {k: v for k, v in self.model_dump().items() if k != "instr"}.values()
         )
 
-    def asm(self, key_width: Optional[int] = None) -> str:
+    def asm(self, key_width: int | None = None) -> str:
         key = self.keyword()
         if key_width is None:
             key_width = len(key)
@@ -156,7 +157,7 @@ class Nop(Instr):
     """
 
 
-Control = Union[Illegal, Stop, Nop]
+Control = Illegal | Stop | Nop
 """Control instructions."""
 
 
@@ -204,7 +205,7 @@ class Loop(Instr):
     address: Value
 
 
-Jump = Union[Jmp, Jge, Jlt, Loop]
+Jump = Jmp | Jge | Jlt | Loop
 """Jump instructions."""
 
 
@@ -343,7 +344,7 @@ class Asr(Instr):
     destination: Register
 
 
-Arithmetic = Union[Move, Not, Add, Sub, And, Or, Xor, Asl, Asr]
+Arithmetic = Move | Not | Add | Sub | And | Or | Xor | Asl | Asr
 """Arithmetic instructions."""
 
 
@@ -457,14 +458,14 @@ class SetAwgOffs(Instr):
         return v
 
 
-ParamOps = Union[SetMrk, SetFreq, ResetPh, SetPh, SetPhDelta, SetAwgGain, SetAwgOffs]
+ParamOps = SetMrk | SetFreq | ResetPh | SetPh | SetPhDelta | SetAwgGain | SetAwgOffs
 """Parameter operations.
 
 The parameters are latched and only updated when the ``upd_param``, ``play``, ``acquire``,
 ``acquire_weighed`` or ``acquire_ttl`` instructions are executed.
 """
 
-Q1Instr = Union[Control, Jump, Arithmetic, ParamOps]
+Q1Instr = Control | Jump | Arithmetic | ParamOps
 """Q1 Instructions.
 
 These instructions are used to compose and manipulate the arguments of
@@ -601,7 +602,7 @@ class AcquireTtl(Instr):
     duration: Immediate
 
 
-Io = Union[UpdParam, Play, Acquire, AcquireWeighed, AcquireTtl]
+Io = UpdParam | Play | Acquire | AcquireWeighed | AcquireTtl
 """Real-time IO operation instructions.
 
 The execution of any of these instructions will cause the latched
@@ -630,7 +631,7 @@ class LatchRst(Instr):
     duration: Value
 
 
-Trigger = Union[SetLatchEn, LatchRst]
+Trigger = SetLatchEn | LatchRst
 """Real-time trigger count control instructions."""
 
 
@@ -668,10 +669,10 @@ class WaitSync(Instr):
     duration: Value
 
 
-WaitOps = Union[Wait, WaitTrigger, WaitSync]
+WaitOps = Wait | WaitTrigger | WaitSync
 """Real-time wait operation instructions."""
 
-RealTimeInstr = Union[Conditional, Io, Trigger, WaitOps]
+RealTimeInstr = Conditional | Io | Trigger | WaitOps
 """Real-time instructions.
 
 These instructions have a duration argument, which corresponds to the
@@ -688,7 +689,7 @@ Therefore, the real-time pipeline will never wait for the Q1 processor.
 In case of a conflict, the sequencer will halt and raise an error flag.
 """
 
-Instruction = Union[Q1Instr, RealTimeInstr]
+Instruction = Q1Instr | RealTimeInstr
 
 
 INSTRUCTIONS = {
@@ -698,7 +699,7 @@ INSTRUCTIONS = {
 }
 
 
-def _format_comment(text: str, width: Optional[int] = None) -> str:
+def _format_comment(text: str, width: int | None = None) -> str:
     lines = [""]
     for block in text.splitlines():
         lines.extend(
@@ -718,14 +719,14 @@ class Comment(str):
     ) -> core_schema.CoreSchema:
         return core_schema.no_info_after_validator_function(cls, handler(str))
 
-    def asm(self, width: Optional[int] = None) -> str:
+    def asm(self, width: int | None = None) -> str:
         return _format_comment(self, width) + "\n"
 
 
 class Line(Model):
     instruction: Instruction
-    label: Optional[str] = None
-    comment: Optional[Annotated[str, AfterValidator(lambda c: c.strip())]] = None
+    label: str | None = None
+    comment: Annotated[str, AfterValidator(lambda c: c.strip())] | None = None
 
     def __rich_repr__(self):
         yield self.instruction
@@ -744,10 +745,10 @@ class Line(Model):
 
     def asm(
         self,
-        width: Optional[int] = None,
-        label_width: Optional[int] = None,
-        instr_name_width: Optional[int] = None,
-        instr_width: Optional[int] = None,
+        width: int | None = None,
+        label_width: int | None = None,
+        instr_name_width: int | None = None,
+        instr_width: int | None = None,
     ) -> str:
         if label_width is None:
             label_width = len(self.label) if self.label is not None else -2
@@ -769,8 +770,8 @@ class Line(Model):
         )
 
 
-Element = Union[Line, Comment]
-Lineable = Union[Line, Instruction]
+Element = Line | Comment
+Lineable = Line | Instruction
 Block = Sequence[Lineable]
 BlockList = list[Lineable]
 BlockIter = Iterable[Lineable]
@@ -801,7 +802,7 @@ class Program(Model):
 
         return cls(elements=elements_)
 
-    def asm(self, width: Optional[int] = None, comments: bool = True) -> str:
+    def asm(self, width: int | None = None, comments: bool = True) -> str:
         max_label_len = max(
             (
                 len(line.label)

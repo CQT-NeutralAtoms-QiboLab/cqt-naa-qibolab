@@ -1,13 +1,14 @@
-from typing import Annotated, Optional, Union
+from collections.abc import Mapping
+from typing import Annotated, Any
 
 from pydantic import ConfigDict, Field
 
 from .identifier import ChannelId, QubitId, TransitionId
 from .serialize import Model
 
-__all__ = ["Qubit"]
+__all__ = ["Qubit", "QubitMap"]
 
-DefaultChannelType = Annotated[Optional[ChannelId], True]
+DefaultChannelType = Annotated[ChannelId | None, True]
 """If ``True`` the channel is included in the default qubit constructor."""
 
 
@@ -23,8 +24,8 @@ class Qubit(Model):
 
     drive: DefaultChannelType = None
     """Ouput channel, to drive the qubit state."""
-    drive_extra: Annotated[dict[Union[TransitionId, QubitId], ChannelId], False] = (
-        Field(default_factory=dict)
+    drive_extra: Annotated[dict[TransitionId | QubitId, ChannelId], False] = Field(
+        default_factory=dict
     )
     """Output channels collection, to drive non-qubit transitions."""
     flux: DefaultChannelType = None
@@ -46,7 +47,9 @@ class Qubit(Model):
         ]
 
     @classmethod
-    def default(cls, name: QubitId, channels: Optional[list[str]] = None, **kwargs):
+    def default(
+        cls, name: QubitId, channels: list[str] | None = None, **kwargs: Any
+    ) -> "Qubit":
         """Create a qubit with default channel names.
 
         Default channel names follow the convention:
@@ -71,5 +74,8 @@ class Qubit(Model):
 class QubitPair(Model):
     """Represent a two-qubit interaction."""
 
-    drive: Optional[ChannelId] = None
+    drive: ChannelId | None = None
     """Output channel, for cross-resonance driving."""
+
+
+QubitMap = Mapping[QubitId, Qubit]

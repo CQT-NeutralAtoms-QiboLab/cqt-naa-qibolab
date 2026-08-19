@@ -1,119 +1,16 @@
 import numpy as np
-import pytest
-from numpy.typing import NDArray
 
 from qibolab._core.execution_parameters import (
     AcquisitionType,
     AveragingMode,
     ExecutionParameters,
 )
-from qibolab._core.identifier import Result
-from qibolab._core.instruments.emulator.hamiltonians import HamiltonianConfig, Qubit
 from qibolab._core.instruments.emulator.results import (
-    acquisitions,
-    calculate_probabilities_from_density_matrix,
-    results,
-    shots,
+    _cyclic_results,
+    _marginalize_probability,
+    _sampled_measurements,
 )
-from qibolab._core.pulses.envelope import Rectangular
-from qibolab._core.pulses.pulse import Acquisition, Pulse
-from qibolab._core.sequence import PulseSequence
-
-
-def _order_probabilities(probs, qubits):
-    """Arrange probabilities according to the given `qubits ordering."""
-    return np.transpose(
-        probs, [i for i, _ in sorted(enumerate(qubits), key=lambda t: t[1])]
-    )
-
-
-def former_calculate(state, subsystems, nsubsystems, d):
-    """Compute probabilities from density matrix."""
-    order = tuple(sorted(subsystems))
-    order += tuple(i for i in range(nsubsystems) if i not in subsystems)
-    order = order + tuple(i + nsubsystems for i in order)
-
-    shape = 2 * (d ** len(subsystems), d ** (nsubsystems - len(subsystems)))
-
-    state = np.reshape(state, 2 * nsubsystems * (d,))
-    state = np.reshape(np.transpose(state, order), shape)
-
-    probs = np.abs(np.einsum("abab->a", state))
-    probs = np.reshape(probs, len(subsystems) * (d,))
-
-    return _order_probabilities(probs, subsystems).ravel()
-
-
-def new_calculate(state, subsystems, nsubsystems, d):
-    """Compute probabilities from density matrix."""
-    state = np.reshape(state, 2 * nsubsystems * (d,))
-    probs = np.abs(np.einsum(state, list(range(nsubsystems)) * 2, sorted(subsystems)))
-    return _order_probabilities(probs, subsystems).ravel()
-
-
-def former_apply_to_last_two_axes(func, array, *args, **kwargs):
-    """Apply function over last two axes."""
-    batch_shape = array.shape[:-2]
-    m = array.shape[-1]
-    reshaped_array = array.reshape(-1, m, m)
-    processed = np.array([func(mat, *args, **kwargs) for mat in reshaped_array])
-    return processed.reshape(*batch_shape, *processed.shape[1:])
-
-
-def former_results(
-    states: NDArray,
-    sequence: PulseSequence,
-    hamiltonian: HamiltonianConfig,
-    options: ExecutionParameters,
-) -> dict[int, Result]:
-    """Collect results for a single pulse sequence.
-
-    The dictionary returned is already compliant with the expected
-    result for the execution of this single sequence, thus suitable
-    to be returned as is.
-    """
-    probabilities = calculate_probabilities_from_density_matrix(
-        states,
-        tuple(hamiltonian.qubits),
-        hamiltonian.nqubits,
-        hamiltonian.transmon_levels,
-    )
-
-    assert options.nshots is not None
-    sampled = shots(np.moveaxis(probabilities, -2, 0), options.nshots)
-    # move measurements dimension to the front, getting ready for extraction
-    measurements = np.moveaxis(sampled, 1, 0)
-
-    results = {}
-    # introduce cached measurements to avoid losing correlations
-    cache_measurements = {}
-    for i, (ro_id, sample) in enumerate(acquisitions(sequence).items()):
-        qubit = int(sequence.pulse_channels(ro_id)[0].split("/")[0])
-        cache_measurements.setdefault(sample, measurements[i])
-        assert hamiltonian.nqubits < 3, (
-            "Results cannot be retrieved for more than 2 transmons"
-        )
-        res = (
-            np.array(
-                [
-                    divmod(val, hamiltonian.transmon_levels)[qubit]
-                    for val in cache_measurements[sample].flatten()
-                ]
-            ).reshape(measurements[i].shape)
-            if hamiltonian.nqubits == 2
-            else cache_measurements[sample]
-        )
-
-        if options.acquisition_type is AcquisitionType.INTEGRATION:
-            res = np.stack((res, np.zeros_like(res)), axis=-1)
-            res = np.random.normal(res, scale=0.001)
-
-        if options.averaging_mode == AveragingMode.CYCLIC:
-            res = np.mean(res, axis=0)
-
-        results[ro_id] = res
-
-    return results
+from qibolab._core.pulses import Acquisition
 
 
 def random_states(space: tuple[int, ...], sweeps: tuple[int, ...] = (), nacq: int = 1):
@@ -125,45 +22,91 @@ def random_states(space: tuple[int, ...], sweeps: tuple[int, ...] = (), nacq: in
     return np.einsum("...i,...j->...ij", state, state)
 
 
-def test_density_to_probs():
-    density = random_states((3,) * 4)
-    a = former_calculate(density, (1, 3), nsubsystems=4, d=3)
-    b = new_calculate(density, (1, 3), nsubsystems=4, d=3)
+def test_marginalize_probability_preserves_sweep_axes():
+    probabilities = np.arange(1, 49).reshape(2, 2, 12)
 
-    assert pytest.approx(a) == b
-
-
-def test_apply_to_last_two_axes():
-    densities = random_states((2,) * 4, (3, 2), nacq=2)
-    a = former_apply_to_last_two_axes(
-        new_calculate, densities, (1, 3), nsubsystems=4, d=2
-    )
-    b = calculate_probabilities_from_density_matrix(
-        densities, (1, 3), nsubsystems=4, d=2
+    marginalized = _marginalize_probability(probabilities, [2, 3, 2], [1, 2])
+    expected = np.stack(
+        (
+            probabilities[:, 0].reshape(2, 2, 3, 2).sum(axis=(1, 3))[..., 1:].sum(-1),
+            probabilities[:, 1].reshape(2, 2, 3, 2).sum(axis=(1, 2))[..., 1:].sum(-1),
+        )
     )
 
-    assert pytest.approx(a) == b
+    np.testing.assert_allclose(marginalized, expected)
 
 
-def test_resultz():
-    densities = random_states((2,) * 2, (3, 2))
-    sequence = PulseSequence(
-        [("0/drive", Pulse(duration=20, amplitude=0.8, envelope=Rectangular()))]
-    ) | PulseSequence([("0/acquisition", Acquisition(duration=1000))])
-    hamiltonian = HamiltonianConfig(qubits={q: Qubit() for q in range(2)})
-    options = ExecutionParameters(nshots=1000)
-
-    fres = former_results(
-        states=densities,
+def test_cyclic_integration_results_marginalize_probabilities(monkeypatch):
+    monkeypatch.setattr(np.random, "normal", lambda loc, scale: loc)
+    acq0 = Acquisition(duration=1)
+    acq1 = Acquisition(duration=1)
+    sequence = _Sequence(
+        {
+            "0/acquisition": [acq0],
+            "1/acquisition": [acq1],
+        }
+    )
+    probabilities = np.array(
+        [
+            [[0.10, 0.20, 0.30], [0.05, 0.15, 0.20]],
+            [[0.10, 0.20, 0.30], [0.05, 0.15, 0.20]],
+        ]
+    )
+    results = _cyclic_results(
+        state_probs=probabilities.reshape(2, -1),
         sequence=sequence,
-        hamiltonian=hamiltonian,
-        options=options,
-    )
-    res = results(
-        states=densities,
-        sequence=sequence,
-        hamiltonian=hamiltonian,
-        options=options,
+        hamiltonian=_HamiltonianConfig(dims=[2, 3]),
+        options=ExecutionParameters(
+            acquisition_type=AcquisitionType.INTEGRATION,
+            averaging_mode=AveragingMode.CYCLIC,
+        ),
     )
 
-    assert all(pytest.approx(r) == f for r, f in zip(res, fres))
+    np.testing.assert_allclose(results[acq0.id], [0.40, 0.0])
+    np.testing.assert_allclose(results[acq1.id], [0.85, 0.0])
+
+
+def test_sampled_measurements_groups_acquisitions_by_sample():
+    sampled = np.array(
+        [
+            [[0, 1], [4, 5]],
+            [[2, 3], [1, 0]],
+        ]
+    )
+    inverse_map = np.array([0, 0, 1])
+
+    measured = _sampled_measurements(
+        sampled=sampled,
+        dims=[2, 3],
+        inverse_map=inverse_map,
+        indices=[0, 1, 1],
+    )
+
+    np.testing.assert_allclose(measured[0], [[0, 0], [1, 1]])
+    np.testing.assert_allclose(measured[1], [[0, 1], [1, 2]])
+    np.testing.assert_allclose(measured[2], [[2, 0], [1, 0]])
+
+
+class _Sequence:
+    def __init__(self, channels):
+        self._channels = channels
+        self.channels = list(channels)
+        self._pulse_channels = {
+            event.id: channel
+            for channel, events in channels.items()
+            for event in events
+        }
+
+    def channel(self, channel):
+        return self._channels[channel]
+
+    def pulse_channels(self, pulse_id):
+        return [self._pulse_channels[pulse_id]]
+
+
+class _HamiltonianConfig:
+    def __init__(self, dims):
+        self.dims = dims
+
+    def hilbert_space_index(self, target):
+        return target

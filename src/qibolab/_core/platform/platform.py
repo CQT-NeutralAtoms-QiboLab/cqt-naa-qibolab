@@ -4,24 +4,22 @@ import logging
 import signal
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Literal, Optional
+from typing import Any, Literal
 
 from ..components import Config
 from ..components.channels import Channel
 from ..execution_parameters import ExecutionParameters
 from ..identifier import ChannelId, QubitId, QubitPairId, Result
-from ..instruments.abstract import Controller
+from ..instruments.abstract import Controller, InstrumentMap
 from ..parameters import (
-    InstrumentMap,
     NativeGates,
     Parameters,
-    QubitMap,
     Settings,
     Update,
     update_configs,
 )
 from ..pulses import PulseId
-from ..qubits import Qubit
+from ..qubits import Qubit, QubitMap
 from ..sequence import PulseSequence
 from ..sweeper import ParallelSweepers
 
@@ -157,7 +155,7 @@ class Platform:
             for name, instrument in self.instruments.items():
                 try:
                     instrument.connect()
-                except Exception as exception:
+                except Exception as exception:  # noqa: BLE001
                     raise RuntimeError(
                         f"Cannot establish connection to instrument {name}. Error captured: '{exception}'",
                     )
@@ -214,8 +212,8 @@ class Platform:
     def execute(
         self,
         sequences: list[PulseSequence],
-        sweepers: Optional[list[ParallelSweepers]] = None,
-        **options,
+        sweepers: list[ParallelSweepers] | None = None,
+        **options: Any,
     ) -> dict[PulseId, Result]:
         """Execute pulse sequences.
 
@@ -252,10 +250,27 @@ class Platform:
                 "The acquisitions' identifiers have to be unique across all sequences."
             )
 
+        available_channels = self.channels
+        missing_channels = sorted(
+            {
+                channel
+                for sequence in sequences
+                for channel in sequence.channels
+                if channel not in available_channels
+            }
+        )
+        if missing_channels:
+            raise ValueError(
+                f"Unknown channel(s) in pulse sequence: {', '.join(missing_channels)}. "
+                "Please ensure that all channels used in pulse sequences are declared "
+                "in the platform initialization script. "
+                f"Available channels: {', '.join(available_channels)}"
+            )
+
         options = self.settings.fill(ExecutionParameters(**options))
 
         time = options.estimate_duration(sequences, sweepers)
-        log.info(f"Minimal execution time: {time:.3f} s")
+        log.info(f"Pulse execution time: {time:.3f} s")
 
         configs = self.parameters.configs.copy()
         update_configs(configs, options.updates)
@@ -276,10 +291,10 @@ class Platform:
         path: Path,
         instruments: InstrumentMap,
         qubits: QubitMap,
-        couplers: Optional[QubitMap] = None,
-        name: Optional[str] = None,
+        couplers: QubitMap | None = None,
+        name: str | None = None,
     ) -> "Platform":
-        """Dump platform."""
+        """Load platform."""
         parameters = Parameters.model_validate_json((path / PARAMETERS).read_text())
         return cls(
             name=name if name is not None else path.name,
@@ -293,7 +308,7 @@ class Platform:
         """Dump platform."""
         (path / PARAMETERS).write_text(self.parameters.model_dump_json(indent=4))
 
-    def _element(self, qubit: QubitId, coupler=False) -> tuple[QubitId, Qubit]:
+    def _element(self, qubit: QubitId, coupler: bool = False) -> tuple[QubitId, Qubit]:
         elements = self.qubits if not coupler else self.couplers
         try:
             return qubit, elements[qubit]

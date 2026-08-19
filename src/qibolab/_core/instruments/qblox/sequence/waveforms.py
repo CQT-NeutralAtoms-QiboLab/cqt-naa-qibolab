@@ -1,5 +1,6 @@
 from collections.abc import Iterable, Sequence
-from typing import Annotated, Union, cast
+from itertools import count
+from typing import Annotated
 
 import numpy as np
 import numpy.typing as npt
@@ -12,7 +13,7 @@ from qibolab._core.sweeper import Sweeper
 __all__ = []
 
 QuadratureIndex = int
-"""Index of the quadrature component (0=I, 1=Q)."""
+"""Index of the quadrature component (even=I, odd=Q)."""
 ComponentId = tuple[UUID4, QuadratureIndex]
 """Index of an individual pulse component.
 
@@ -35,7 +36,7 @@ class WaveformSpec(Model):
     duration: int
 
 
-def _pulse(event: Union[Pulse, Readout], amplitude_swept: bool) -> Pulse:
+def _pulse(event: Pulse | Readout, amplitude_swept: bool) -> Pulse:
     """Extract pulse from event.
 
     Accounts for nested pulses within :class:`Readout` operations.
@@ -103,44 +104,43 @@ def _deduplicate_pulses(
 
 
 def _deduplicate_waveforms(
-    waveforms: dict[WaveformIndex, WaveformSpec],
-) -> tuple[dict[WaveformIndex, WaveformSpec], dict[WaveformIndex, WaveformIndex]]:
+    waveforms: list[WaveformSpec],
+) -> tuple[list[WaveformSpec], list[WaveformIndex]]:
     """Deduplicate waveforms by sampled waveform arrays.
 
     Returns:
         A tuple containing:
-            - dict[WaveformIndex, WaveformSpec]: The unique waveforms re-indexed from 0.
-            - dict[WaveformIndex, WaveformIndex]: Mapping from each original waveform
+            - list[WaveformSpec]: The unique waveforms re-indexed from 0.
+            - list[WaveformIndex]: Mapping from each original waveform
               index to its deduplicated waveform index.
     """
 
-    waveforms_ = list(waveforms.values())
-    waveform_arrays = np.array([waveform.waveform.data for waveform in waveforms_])
+    waveform_arrays = np.array(
+        [waveform.waveform.data.tobytes() for waveform in waveforms]
+    )
     _, unique_idx, inverse_idx = np.unique(
-        waveform_arrays, axis=0, return_index=True, return_inverse=True
+        waveform_arrays, return_index=True, return_inverse=True
     )
 
-    deduplicated = {
-        new_index: waveforms_[orig_index].model_copy(
+    deduplicated = [
+        waveforms[orig_index].model_copy(
             update={
-                "waveform": waveforms_[orig_index].waveform.model_copy(
+                "waveform": waveforms[orig_index].waveform.model_copy(
                     update={"index": new_index}
                 )
             }
         )
         for new_index, orig_index in enumerate(unique_idx)
-    }
+    ]
 
-    orig_to_deduplicated_index = dict(zip(waveforms, inverse_idx))
-
-    return deduplicated, orig_to_deduplicated_index
+    return deduplicated, inverse_idx.astype(int).tolist()
 
 
 def waveforms(
     sequence: Iterable[PulseLike],
     sampling_rate: float,
     amplitude_swept: set[PulseId],
-    duration_swept: dict[PulseLike, Sweeper],
+    duration_swept: dict[PulseId, Sweeper],
 ) -> tuple[dict[WaveformIndex, WaveformSpec], WaveformIndices]:
     """Build the waveform memory map and pulse-component index map for a sequence.
 
@@ -153,67 +153,116 @@ def waveforms(
        unique envelopes share the same, non-unique, I or Q component.
     5. Construct ``indices_map`` mapping ``(pulse UUID, quadrature)`` to the final
        deduplicated memory index and the corresponding duration.
+
+    This is the workflow represented as a diagram::
+
+                  pulses          ┃    pulses deduplicated    ┃         waveforms         ┃   waveforms deduplicated
+        ━━━━━━━━━━━━━━━━━━━━━━━━━━╋━━━━━━━━━━━━━━━━━━━━━━━━━━━╋━━━━━━━━━━━━━━━━━━━━━━━━━━━╋━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+             ┏━━━┳━━━┓            ┃                           ┃                           ┃
+             ┃   ┃   ┃ ━━━━━━━━━━━╋━━━━━┓     ┏━━━┳━━━┓       ┃           ┏━━━┓           ┃            ┏━━━┓
+             ┗━━━┻━━━┛            ┃     ┗━━━▶ ┃   ┃   ┃ ━━━━━━╋━━━━━┓     ┃   ┃  ━━━━━━━━━╋━━━━━━━━━▶  ┃   ┃
+             ┏━━━┳━━━┓            ┃     ┏━━━▶ ┗━━━┻━━━┛       ┃     ┗━━━▶ ┣━━━┫           ┃            ┣━━━┫
+             ┃   ┃   ┃ ━━━━━━━━━━━╋━━━━━┛                     ┃           ┃   ┃  ━━━━━━━━━╋━━━━━━━━━▶  ┃   ┃
+             ┗━━━┻━━━┛            ┃                           ┃           ┗━━━┛           ┃            ┣━━━┫
+             ┏━━━┳━━━┓            ┃           ┏━━━┳━━━┓       ┃                           ┃     ┏━━━▶  ┃   ┃
+             ┃   ┃   ┃ ━━━━━━━━━━━╋━━━━━━━━━▶ ┃   ┃   ┃ ━━━━━━╋━━━━━┓     ┏━━━┓           ┃     ┃      ┗━━━┛
+             ┗━━━┻━━━┛            ┃           ┗━━━┻━━━┛       ┃     ┃     ┃   ┃  ━━━━━━━━━╋━━━━━┨
+                                  ┃                           ┃     ┗━━━▶ ┣━━━┫           ┃     ┃
+                ...               ┃              ...          ┃           ┃   ┃  ━━━━━━━━━╋━━━━━┛
+                                  ┃                           ┃           ┗━━━┛           ┃
+                                  ┃                           ┃                           ┃
+                                 inv                       2x + 0/1        ...      orig_to_dedup
+                             ━━━━━╋━━━━▶                ━━━━━━╋━━━━━━▶           ━━━━━━━━━╋━━━━━━━━▶
+                                  ┃                           ┃                           ┃
+                                  ┃                           ┃                           ┃
+                   ━━━━━━━━━━━━━━━╋━━━━━━━━━━━━━━━━━━━━━ indices_map ━━━━━━━━━━━━━━━━━━━━━╋━━━━━━━━━━━━▶
     """
-    pulses_not_swept = [
-        _pulse(p, p.id in amplitude_swept)
-        for p in sequence
-        if isinstance(p, (Pulse, Readout)) and p not in duration_swept
-    ]
-    pulses_swept = [
-        (_pulse(p, p.id in amplitude_swept), duration_swept[p])
-        for p in duration_swept
-        if isinstance(p, (Pulse, Readout))
-    ]
+
+    pulses_not_swept: list[Pulse] = []
+    pulses_swept: list[tuple[Pulse, Sweeper]] = []
+    for p in sequence:
+        if isinstance(p, (Pulse, Readout)):
+            if p.id in duration_swept:
+                pulses_swept.append(
+                    (_pulse(p, p.id in amplitude_swept), duration_swept[p.id])
+                )
+            else:
+                pulses_not_swept.append(_pulse(p, p.id in amplitude_swept))
 
     unique_pulses, inverse_idx = _deduplicate_pulses(pulses_not_swept)
 
-    # the ids for the swept pulses start counting from `static` since up to here we need
-    # two indices (i and q) for each unique non-swept pulse
-    static = 2 * len(unique_pulses)
-
-    # mapping from integer to unique WaveformSpec
-    waveforms: dict[int, WaveformSpec] = {  # non-swept
-        2 * k + ch: _waveform(
+    # setting a counter for non-swept waveforms
+    counter = count()
+    # mapping non-swept waveforms from integer to unique WaveformSpec
+    non_swept_waveforms: list[WaveformSpec] = [
+        _waveform(
             pulse,
             comp,
             sampling_rate,
-            index=k * 2 + ch,
+            index=next(counter),
         )
-        for k, pulse in enumerate(unique_pulses)
-        for ch, comp in enumerate(("i", "q"))
-    } | {  # swept
-        static + 2 * k + ch: _waveform(
-            pulse,
-            comp,
-            sampling_rate,
-            duration=cast(float, duration),
-            index=static + 2 * k + ch,
-        )
-        for k, (pulse, sweep) in enumerate(pulses_swept)
-        for duration in np.arange(*sweep.irange)
-        for ch, comp in enumerate(("i", "q"))
-    }
+        for pulse in unique_pulses
+        for comp in ("i", "q")
+    ]
 
-    # perform deduplication of waveforms based on their sampled arrays, this is
+    # perform deduplication of non-swept waveforms based on their sampled arrays, this is
     # necessary _deduplicate_pulses only deduplicates non-unique Pulses, but not
     # non-unique I and Q components.
-    deduplicated_waveforms, orig_to_deduplicated = _deduplicate_waveforms(waveforms)
+    deduplicated_waveforms, orig_to_deduplicated = _deduplicate_waveforms(
+        non_swept_waveforms
+    )
+
+    # the ids for the swept pulses start counting from `static` since up to here we need
+    # two indices (i and q) for each unique non-swept pulse
+    static = len(deduplicated_waveforms)
+    # setting the counter to the number of deduplicated waveforms
+    counter = count(static)
+    # mapping swept waveforms from integer to unique WaveformSpec
+    swept_waveforms: list[WaveformSpec] = [
+        _waveform(
+            pulse,
+            comp,
+            sampling_rate,
+            duration=duration,
+            index=next(counter),
+        )
+        for pulse, sweep in pulses_swept
+        for duration in np.arange(*sweep.irange)
+        for comp in ("i", "q")
+    ]
+
+    deduplicated_waveforms += swept_waveforms
 
     # mapping that associate each element in the full list of pulses identified by
     # (UUID, i or q) to an integer that can be associated with a WaveformSpec through
     # waveforms
-    indices_map: WaveformIndices = {  # non-swept
-        (pulse.id, ch): (int(orig_to_deduplicated[inv * 2 + ch]), int(pulse.duration))
-        for inv, pulse in zip(inverse_idx, pulses_not_swept)
-        for ch, _ in enumerate(("i", "q"))
-    } | {  # swept
-        (pulse.id, 2 * i + ch): (
-            int(orig_to_deduplicated[static + 2 * k + ch]),
-            int(duration),
+    indices_map: WaveformIndices = {
+        (pulse.id, iq_idx): (
+            # here we are using the inverse index to map back to the original list of waveforms;
+            # the waveform list used to generate the `orig_to_deduplicated`
+            # mapping is ordered pulse-wise, hence I-Q components of the same pulse are
+            # adjacent, that's why we can use `inv * 2 + iq_idx` to get the correct index
+            orig_to_deduplicated[inv * 2 + iq_idx],
+            int(pulse.duration),
         )
-        for k, (pulse, sweep) in enumerate(pulses_swept)
-        for i, duration in enumerate(np.arange(*sweep.irange))
-        for ch, _ in enumerate(("i", "q"))
+        for inv, pulse in zip(inverse_idx, pulses_not_swept)
+        for iq_idx, _ in enumerate(("i", "q"))
     }
 
-    return deduplicated_waveforms, indices_map
+    # this offset is necessary since we want to keep track of the index for swept waveforms
+    # while we are resetting the counter for every swept pulse
+    offset = static
+    for pulse, sweep in pulses_swept:
+        # resetting the counter for every spwept pulse
+        counter = count()
+        indices_map |= {  # swept
+            (pulse.id, (idx := next(counter))): (
+                idx + offset,
+                int(duration),
+            )
+            for duration in np.arange(*sweep.irange)
+            for _ in ("i", "q")
+        }
+        offset += next(counter)
+
+    return dict(enumerate(deduplicated_waveforms)), indices_map
