@@ -1,5 +1,5 @@
 from abc import ABC, abstractmethod
-from typing import Optional
+from collections.abc import Mapping
 
 from pydantic import ConfigDict, Field
 
@@ -11,6 +11,13 @@ from ..identifier import ChannelId, Result
 from ..sequence import PulseSequence
 from ..serialize import Model
 from ..sweeper import ParallelSweepers
+
+__all__ = [
+    "Controller",
+    "Instrument",
+    "InstrumentId",
+    "InstrumentMap",
+]
 
 InstrumentId = str
 
@@ -31,7 +38,7 @@ class Instrument(Model, ABC):
     model_config = ConfigDict(arbitrary_types_allowed=True, frozen=False, extra="allow")
 
     address: str
-    settings: Optional[InstrumentSettings] = None
+    settings: InstrumentSettings | None = None
 
     @property
     def signature(self):
@@ -52,6 +59,9 @@ class Instrument(Model, ABC):
         (like LO frequency and power) to the instrument after
         connecting.
         """
+
+
+InstrumentMap = Mapping[InstrumentId, Instrument]
 
 
 class Controller(Instrument):

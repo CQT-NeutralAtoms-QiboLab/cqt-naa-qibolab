@@ -1,15 +1,15 @@
 from functools import cached_property
-from typing import Literal, Optional, Union
+from typing import Literal
 
 import numpy as np
+from numpy.typing import NDArray
 from pydantic import Field
-from qibo.config import raise_error
 from scipy.constants import giga
 
 from ...components import Config
 from ...identifier import QubitId, QubitPairId, TransitionId
 from ...parameters import Update, _setvalue
-from ...pulses import Delay, Pulse, PulseLike, VirtualZ
+from ...pulses import Delay, IqWaveform, Pulse, PulseLike, VirtualZ
 from ...serialize import Model
 from .engine import Operator, SimulationEngine
 
@@ -25,8 +25,6 @@ class DriveEmulatorConfig(Config):
     """Frequency of drive."""
     rabi_frequency: float = 1e9
     """Rabi frequency [Hz]"""
-    scale_factor: float = 1
-    """Scaling factor."""
 
     @staticmethod
     def operator(n: int, engine: SimulationEngine) -> Operator:
@@ -45,7 +43,7 @@ class FluxEmulatorConfig(Config):
 
     @staticmethod
     def operator(n: int, engine: SimulationEngine) -> Operator:
-        return engine.create(n) * engine.destroy(n)
+        return engine.create(n) @ engine.destroy(n)
 
     @property
     def flux(self) -> float:
@@ -82,15 +80,19 @@ class Qubit(Config):
 
     def operator(self, n: int, engine: SimulationEngine, flux: float = 0):
         """Time independent operator."""
-        quadratic_term = engine.create(n) * engine.destroy(n) * self.omega(flux) / giga
+        quadratic_term = (
+            (engine.create(n) @ engine.destroy(n)) * self.omega(flux) / giga
+        )
         quartic_term = (
             self.anharmonicity
             * np.pi
             / giga
-            * engine.create(n)
-            * engine.create(n)
-            * engine.destroy(n)
-            * engine.destroy(n)
+            * (
+                engine.create(n)
+                @ engine.create(n)
+                @ engine.destroy(n)
+                @ engine.destroy(n)
+            )
         )
         return quadratic_term + quartic_term
 
@@ -101,8 +103,10 @@ class Qubit(Config):
     def relaxation(self, n: int, engine: SimulationEngine) -> Operator:
         return sum(
             np.sqrt(1 / t1)
-            * engine.basis(state=transition[0], dim=n)
-            * engine.basis(state=transition[1], dim=n).dag()
+            * (
+                engine.basis(state=transition[0], dim=n)
+                @ engine.basis(state=transition[1], dim=n).dag()
+            )
             for transition, t1 in self.t1.items()
         )
 
@@ -111,9 +115,9 @@ class Qubit(Config):
             np.sqrt(1 / self.t_phi(pair) / 2)
             * (
                 engine.basis(state=pair[0], dim=n)
-                * engine.basis(state=pair[0], dim=n).dag()
+                @ engine.basis(state=pair[0], dim=n).dag()
                 - engine.basis(state=pair[1], dim=n)
-                * engine.basis(state=pair[1], dim=n).dag()
+                @ engine.basis(state=pair[1], dim=n).dag()
             )
             for pair in self.t2
         )
@@ -173,7 +177,7 @@ class FluxPulse(Model):
         """Virtual Z phase."""
         return 0
 
-    def __call__(self, t, sample, phase):
+    def __call__(self, times: NDArray, samples: NDArray, phase: float) -> IqWaveform:
         i, _ = self.envelopes
         # we are passing the relative frequency because the term with the offset
         # is already included in the time-independent part of the Hamiltonian
@@ -183,7 +187,7 @@ class FluxPulse(Model):
             * np.pi
             * (
                 self.qubit.detuned_frequency(
-                    self.config.voltage_to_flux * (i[sample] + self.config.offset)
+                    self.config.voltage_to_flux * (i[samples] + self.config.offset)
                 )
                 - self.qubit.detuned_frequency(self.config.flux)
             )
@@ -204,31 +208,27 @@ class ModulatedDrive(Model):
     """Sampling rate."""
 
     @cached_property
-    def envelopes(self):
+    def envelopes(self) -> IqWaveform:
         """Pulse envelopes."""
         return self.pulse.envelopes(self.sampling_rate)
 
     @property
-    def duration(self):
+    def duration(self) -> float:
         """Duration of the pulse."""
         return self.pulse.duration
 
     @property
-    def omega(self):
+    def omega(self) -> float:
         return 2 * np.pi * self.config.frequency / giga
 
     @property
-    def rabi_omega(self):
+    def rabi_omega(self) -> float:
         return 2 * np.pi * self.config.rabi_frequency / giga
 
-    def __call__(self, t, sample, phase):
+    def __call__(self, times: NDArray, samples: NDArray, phase: float) -> IqWaveform:
         i, q = self.envelopes
-        phi = self.omega * t + self.pulse.relative_phase + phase
-        return (
-            self.rabi_omega
-            * self.config.scale_factor
-            * (np.cos(phi) * i[sample] + np.sin(phi) * q[sample])
-        )
+        phi = self.omega * times + self.pulse.relative_phase + phase
+        return self.rabi_omega * (np.cos(phi) * i[samples] + np.sin(phi) * q[samples])
 
 
 class ModulatedDelay(Model):
@@ -254,11 +254,11 @@ class ModulatedVirtualZ(Model):
 
     def __call__(self, t: float, sample: int, phase: float) -> float:
         """Delay waveform."""
-        raise_error(ValueError, "VirtualZ doesn't have waveform.")
+        raise ValueError("VirtualZ doesn't have waveform.")
 
 
-Modulated = Union[ModulatedDrive, ModulatedDelay, ModulatedVirtualZ]
-ControlLine = Union[Modulated, FluxPulse]
+Modulated = ModulatedDrive | ModulatedDelay | ModulatedVirtualZ
+ControlLine = Modulated | FluxPulse
 
 
 class HamiltonianConfig(Config):
@@ -298,21 +298,21 @@ class HamiltonianConfig(Config):
         """Time independent part of Hamiltonian."""
         qubit_terms = sum(
             engine.expand(
-                qubit.operator(
+                op=qubit.operator(
                     n=self.transmon_levels,
                     flux=static_flux(qubit=i, config=config),
                     engine=engine,
                 ),
-                self.dims,
-                self.hilbert_space_index(i),
+                dims=self.dims,
+                targets=self.hilbert_space_index(i),
             )
             for i, qubit in self.qubits.items()
         )
         coupling = sum(
             engine.expand(
-                pair.operator(self.transmon_levels, engine),
-                self.dims,
-                [
+                op=pair.operator(self.transmon_levels, engine),
+                dims=self.dims,
+                targets=[
                     self.hilbert_space_index(pair_id[0]),
                     self.hilbert_space_index(pair_id[1]),
                 ],
@@ -330,17 +330,17 @@ class HamiltonianConfig(Config):
             if len(qubit.t1) > 0:
                 collapse_operators.append(
                     engine.expand(
-                        qubit.relaxation(self.transmon_levels, engine),
-                        self.dims,
-                        self.hilbert_space_index(i),
+                        op=qubit.relaxation(self.transmon_levels, engine),
+                        dims=self.dims,
+                        targets=self.hilbert_space_index(i),
                     )
                 )
             if len(qubit.t2) > 0:
                 collapse_operators.append(
                     engine.expand(
-                        qubit.dephasing(self.transmon_levels, engine),
-                        self.dims,
-                        self.hilbert_space_index(i),
+                        op=qubit.dephasing(self.transmon_levels, engine),
+                        dims=self.dims,
+                        targets=self.hilbert_space_index(i),
                     )
                 )
         return collapse_operators
@@ -362,7 +362,7 @@ def waveform(
     config: Config,
     qubit: Qubit,
     sampling_rate: float,
-) -> Optional[ControlLine]:
+) -> ControlLine | None:
     """Convert pulse to hamiltonian."""
     if not isinstance(config, (DriveEmulatorConfig, FluxEmulatorConfig)):
         return None

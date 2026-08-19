@@ -4,8 +4,9 @@ The format is explained in the :ref:`Loading platform parameters from
 JSON <parameters_json>` example.
 """
 
-from collections.abc import Callable, Iterable, Mapping
-from typing import Annotated, Any, Optional, Union
+from collections.abc import Callable, Iterable
+from types import UnionType
+from typing import Annotated, Any, ClassVar, Union
 
 from pydantic import (
     BeforeValidator,
@@ -16,19 +17,7 @@ from pydantic import (
 )
 from pydantic_core import core_schema
 
-from .components import (
-    AcquisitionChannel,
-    AcquisitionConfig,
-    Channel,
-    ChannelConfig,
-    Config,
-    DcChannel,
-    DcConfig,
-    IqChannel,
-    IqConfig,
-    IqMixerConfig,
-    OscillatorConfig,
-)
+from .components import ChannelConfig, Config
 from .execution_parameters import ConfigUpdate, ExecutionParameters, Update
 from .identifier import ChannelId, QubitId, QubitPairId
 from .instruments.abstract import Instrument, InstrumentId
@@ -37,14 +26,7 @@ from .pulses import Acquisition, Pulse, Readout, Rectangular, Ttl
 from .qubits import Qubit
 from .serialize import Model, replace
 
-__all__ = [
-    "ConfigKinds",
-    "QubitMap",
-    "InstrumentMap",
-    "Hardware",
-    "Parameters",
-    "initialize_parameters",
-]
+__all__ = ["ConfigKinds", "Parameters"]
 
 
 def update_configs(configs: dict[str, Config], updates: list[ConfigUpdate]):
@@ -148,9 +130,7 @@ ComponentId = str
 This is assumed to always be in its serialized form.
 """
 
-# TODO: replace _UnionType with UnionType, once py3.9 will be abandoned
-_UnionType = Any
-_ChannelConfigT = Union[_UnionType, type[Config]]
+_ChannelConfigT = UnionType | type[Config]
 _BUILTIN_CONFIGS: tuple[_ChannelConfigT, ...] = (ChannelConfig,)
 
 
@@ -167,7 +147,7 @@ class ConfigKinds:
         loading operations.
     """
 
-    _registered: list[_ChannelConfigT] = list(_BUILTIN_CONFIGS)
+    _registered: ClassVar[list[_ChannelConfigT]] = list(_BUILTIN_CONFIGS)
 
     @classmethod
     def extend(cls, kinds: Iterable[_ChannelConfigT]):
@@ -196,7 +176,7 @@ class ConfigKinds:
         """
         return TypeAdapter(
             Annotated[
-                Union[tuple(ConfigKinds._registered)], Field(discriminator="kind")
+                Union[tuple(ConfigKinds._registered)], Field(discriminator="kind")  # noqa: UP007
             ]
         )
 
@@ -245,114 +225,3 @@ class Parameters(Model):
             _setvalue(d, path, val)
 
         return self.model_validate(d)
-
-
-QubitMap = Mapping[QubitId, Qubit]
-InstrumentMap = Mapping[InstrumentId, Instrument]
-
-
-class Hardware(Model):
-    """Part of the platform that specifies the hardware configuration."""
-
-    instruments: InstrumentMap
-    qubits: QubitMap
-    couplers: QubitMap = Field(default_factory=dict)
-
-
-def _gate_channel(qubit: Qubit, gate: str) -> str:
-    """Default channel that a native gate plays on."""
-    if gate in ("RX", "RX90", "CNOT"):
-        return qubit.drive
-    if gate == "RX12":
-        return qubit.drive_extra[(1, 2)]
-    if gate == "MZ":
-        return qubit.acquisition
-    if gate in ("CP", "CZ", "iSWAP"):
-        return qubit.flux
-
-
-def _gate_sequence(qubit: Qubit, gate: str) -> Native:
-    """Default sequence corresponding to a native gate."""
-    channel = _gate_channel(qubit, gate)
-    pulse = Pulse(duration=0, amplitude=0, envelope=Rectangular())
-    if gate != "MZ":
-        return Native([(channel, pulse)])
-
-    return Native(
-        [(channel, Readout(acquisition=Acquisition(duration=0), probe=pulse))]
-    )
-
-
-def _pair_to_qubit(pair: str, qubits: QubitMap) -> Qubit:
-    """Get first qubit of a pair given in ``{q0}-{q1}`` format."""
-    q = tuple(pair.split("-"))[0]
-    try:
-        return qubits[q]
-    except KeyError:
-        return qubits[int(q)]
-
-
-def _native_builder(cls, qubit: Qubit, natives: set[str]) -> NativeContainer:
-    """Build default native gates for a given qubit or pair.
-
-    In case of pair, ``qubit`` is assumed to be the first qubit of the pair,
-    and a default pulse is added on that qubit, because at this stage we don't
-    know which qubit is the high frequency one.
-    """
-    return cls(
-        **{
-            gate: _gate_sequence(qubit, gate)
-            for gate in cls.model_fields.keys() & natives
-        }
-    )
-
-
-def _channel_config(id: ChannelId, channel: Channel) -> dict[ChannelId, Config]:
-    """Default configs correspondign to a channel."""
-    if isinstance(channel, DcChannel):
-        return {id: DcConfig(offset=0)}
-    if isinstance(channel, AcquisitionChannel):
-        return {id: AcquisitionConfig(delay=0, smearing=0)}
-    if isinstance(channel, IqChannel):
-        configs = {id: IqConfig(frequency=0)}
-        if channel.lo is not None:
-            configs[channel.lo] = OscillatorConfig(frequency=0, power=0)
-        if channel.mixer is not None:
-            configs[channel.mixer] = IqMixerConfig(frequency=0, power=0)
-        return configs
-    return {id: Config()}
-
-
-def initialize_parameters(
-    hardware: Hardware,
-    natives: Optional[set[str]] = None,
-    pairs: Optional[list[str]] = None,
-) -> Parameters:
-    """Generates default ``Parameters`` for a given hardware configuration."""
-    natives = set(natives if natives is not None else ())
-    configs = {}
-    for instrument in hardware.instruments.values():
-        if hasattr(instrument, "channels"):
-            for id, channel in instrument.channels.items():
-                configs |= _channel_config(id, channel)
-
-    single_qubit = {
-        q: _native_builder(SingleQubitNatives, qubit, natives - {"CP"})
-        for q, qubit in hardware.qubits.items()
-    }
-    coupler = {
-        q: _native_builder(SingleQubitNatives, qubit, natives & {"CP"})
-        for q, qubit in hardware.couplers.items()
-    }
-    two_qubit = {
-        pair: _native_builder(
-            TwoQubitNatives, _pair_to_qubit(pair, hardware.qubits), natives
-        )
-        for pair in (pairs if pairs is not None else ())
-    }
-
-    native_gates = NativeGates(
-        single_qubit=single_qubit, coupler=coupler, two_qubit=two_qubit
-    )
-
-    return Parameters(settings=Settings(), configs=configs, native_gates=native_gates)

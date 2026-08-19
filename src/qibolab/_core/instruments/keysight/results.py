@@ -15,7 +15,7 @@ def fetch_result(
     channel: qcs.Channels,
     acquisition_type: AcquisitionType,
     averaging: bool,
-) -> dict[qcs.Channels, np.ndarray]:
+) -> np.ndarray:
     """Processes the QCS result object to return the appropiate results.
 
     Arguments:
@@ -26,40 +26,52 @@ def fetch_result(
         sweeper_swaps_required (list[tuple[int, int]]): Array of axes pairs corresponding to swapped sweepers.
 
     Returns:
-        raw (dict[qcs.Channels, np.ndarray]): Map of virtual channel to acquisition results.
+        raw (np.ndarray): Acquisition results.
     """
     if acquisition_type is AcquisitionType.RAW:
         raw = results.get_trace(channel, averaging)
     elif acquisition_type is AcquisitionType.INTEGRATION:
-        raw = results.get_iq(channel, averaging)
+        raw = results.get_iq(channel, averaging, acq_index=None)
     elif acquisition_type is AcquisitionType.DISCRIMINATION:
-        raw = results.get_classified(channel, averaging)
+        if averaging:
+            # At worst, raw currently holds an array with shape of (sweepers, measurements, states)
+            raw = results.get_qubit_state_counts(channel, acq_index=None)
+            # We shrink the last dimension to be consistent with the IQ acquisition
+            raw = {key: val[..., 1] / np.sum(val, axis=-1) for key, val in raw.items()}
+        else:
+            raw = results.get_classified(channel, avg=False, acq_index=None)
     else:
         raise ValueError("Acquisition type unrecognized")
-    return raw
+
+    # Since we request the results for a single channel, this is a dict with only one key
+    return raw[channel]
 
 
-def parse_result(result: np.ndarray, options: ExecutionParameters) -> np.ndarray:
+def parse_result(
+    result: np.ndarray, options: ExecutionParameters, singleshot_dim=None
+) -> np.ndarray:
     """Parses resulting numpy array into Qibolab expected array shape.
 
     Arguments:
         result (np.ndarray): Result array from QCS.
         options (ExecutionParameters): Execution settings.
-        sweepers (list[ParallelSweepers]): Array of array of sweepers.
+        singleshot_dim (int): Axis position of the number of shots, used for single-shot with hardware sweepers.
 
     Returns:
         parsed_result (np.ndarray): Parsed numpy array.
     """
+
     if (
-        options.averaging_mode is not AveragingMode.SINGLESHOT
-        and options.acquisition_type is not AcquisitionType.INTEGRATION
+        options.averaging_mode is AveragingMode.SINGLESHOT
+        and singleshot_dim is not None
     ):
-        return result
-    # For single shot, qibolab expects result format (nshots, ...)
-    # QCS returns (..., nshots), so we need to shuffle the arrays
-    if options.averaging_mode is AveragingMode.SINGLESHOT:
-        result = np.moveaxis(result, -1, 0)
-    # For IQ data, QCS returns complex results
-    if options.acquisition_type is not AcquisitionType.INTEGRATION:
-        return result
-    return np.moveaxis(np.stack([np.real(result), np.imag(result)]), 0, -1)
+        # Current result shape is software_sweepers x nshots x hardware_sweepers
+        # Qibolab expects the shape of nshots x sweepers
+        result = np.moveaxis(result, singleshot_dim, 0)
+
+    # IQ data
+    if options.acquisition_type is AcquisitionType.INTEGRATION:
+        # Current result dtype is complex, and we need to unwrap it into the I and Q components
+        return np.stack([np.real(result), np.imag(result)], axis=-1)
+
+    return result

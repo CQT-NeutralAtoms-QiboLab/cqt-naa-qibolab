@@ -5,7 +5,6 @@ from collections import defaultdict
 from dataclasses import asdict, dataclass
 from os import PathLike
 from pathlib import Path
-from typing import Optional, Union
 
 from pydantic import Field
 from qm import QmPendingJob, QuantumMachine, QuantumMachinesManager, generate_qua_script
@@ -38,7 +37,7 @@ from .program.sweepers import find_lo_frequencies, sweeper_amplitude
 CALIBRATION_DB = "calibration_db.json"
 """Name of the file where the mixer calibration is stored."""
 
-__all__ = ["QmController", "Octave"]
+__all__ = ["Octave", "QmController"]
 
 MAX_VOLTAGE = 0.5
 """Maximum output of Quantum Machines OPX+ in Volts."""
@@ -114,7 +113,7 @@ class Experiment(Model):
 
 
 class Cache(Model):
-    machine: Union[QuantumMachine, QmApiWithDeprecations]
+    machine: QuantumMachine | QmApiWithDeprecations
     program_id: str
     acquisitions: Acquisitions
 
@@ -123,8 +122,8 @@ class Cache(Model):
 
 
 def _update_pulse_amplitude(
-    pulse: Union[Pulse, Readout], amplitude: float
-) -> Union[Pulse, Readout]:
+    pulse: Pulse | Readout, amplitude: float
+) -> Pulse | Readout:
     """Update pulse amplitude.
 
     Needed when sweeping amplitude because the original amplitude
@@ -256,7 +255,7 @@ class QmController(Controller):
 
     keep_dc_offsets_on: bool = True
     """Keep DC offsets on after disconnecting from Quantum Machines."""
-    cluster_name: Optional[str] = None
+    cluster_name: str | None = None
     """Name of the Quantum Machines clusters to use.
 
     Needs to be specified only when more than one clusters are connected to
@@ -264,33 +263,33 @@ class QmController(Controller):
     https://docs.quantum-machines.co/latest/docs/Hardware/network_and_router/#accessing-the-cluster
     for more details.
     """
-    calibration_path: Optional[PathLike] = None
+    calibration_path: PathLike | None = None
     """Path to the JSON file that contains the mixer calibration."""
     write_calibration: bool = False
     """Require writing permissions on calibration DB."""
-    _calibration_path: Optional[PathLike] = None
+    _calibration_path: PathLike | None = None
     """The calibration path for internal use.
 
     Cf. :attr:`calibration_path` for its role. This might be set to a different one
     internally to avoid writing attempts over a file for which the user has only read
     access (because TinyDB, through QUA, is often attempting to open it in append mode).
     """
-    script_file_name: Optional[str] = None
+    script_file_name: str | None = None
     """Name of the file that the QUA program will dumped in that after every
     execution.
 
     If ``None`` the program will not be dumped.
     """
 
-    manager: Optional[QuantumMachinesManager] = None
+    manager: QuantumMachinesManager | None = None
     """Manager object used for controlling the Quantum Machines cluster."""
 
     config: Configuration = Field(default_factory=Configuration)
     """Configuration dictionary required for pulse execution on the OPXs."""
-    experiment: Optional[Experiment] = None
-    cache: Optional[Cache] = None
+    experiment: Experiment | None = None
+    cache: Cache | None = None
 
-    simulation_duration: Optional[int] = None
+    simulation_duration: int | None = None
     """Duration for the simulation in ns.
 
     If given the simulator will be used instead of actual hardware
@@ -306,7 +305,7 @@ class QmController(Controller):
     Default is ``False``.
     """
 
-    def model_post_init(self, __context):
+    def model_post_init(self, __context, /):
         if self.simulation_duration is not None:
             raise NotImplementedError(
                 "Simulation is no longer supported by the QM driver."
@@ -366,7 +365,7 @@ class QmController(Controller):
 
     def configure_channel(
         self, channel: ChannelId, configs: dict[str, Config]
-    ) -> Optional[ChannelId]:
+    ) -> ChannelId | None:
         """Add element (QM version of channel) in the config.
 
         When an ``AcquisitionChannel`` is registered it returns the corresponding probe
@@ -489,9 +488,7 @@ class QmController(Controller):
             acquisitions (dict): Map from measurement instructions to acquisition objects.
         """
         for id, pulse in sequence:
-            if isinstance(pulse, Pulse):
-                self.register_pulse(id, configs[id], pulse)
-            elif isinstance(pulse, Readout):
+            if isinstance(pulse, (Pulse, Readout)):
                 self.register_pulse(id, configs[id], pulse)
             elif isinstance(pulse, Ttl):
                 self.register_pulse(id, configs[id], pulse)

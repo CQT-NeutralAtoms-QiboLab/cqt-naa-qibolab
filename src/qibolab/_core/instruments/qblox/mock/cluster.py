@@ -1,5 +1,5 @@
 import json
-from typing import Any, Optional
+from typing import Any
 
 from qblox_instruments import SequencerStatus, SequencerStatuses
 
@@ -20,7 +20,7 @@ class MockSequencer:
         if name in ["idx", "register", "ancestors", "seq_idx"]:
             return super().__getattribute__(name)
 
-        log: dict["str", Any] = {"name": name}
+        log: dict[str, Any] = {"name": name}
         self.register["calls"].append(log)
 
         def wrapped(*args, **kwargs):
@@ -63,7 +63,7 @@ class MockModule:
         ]:
             return super().__getattribute__(name)
 
-        log: dict["str", Any] = {"name": name}
+        log: dict[str, Any] = {"name": name}
         self.register["calls"].append(log)
 
         def wrapped(*args, **kwargs):
@@ -98,7 +98,7 @@ class MockCluster:
         return json.dumps(self.records)
 
     @property
-    def sequences(self) -> dict[tuple[int, int], Optional[dict]]:
+    def sequences(self) -> dict[tuple[int, int], dict | None]:
         return {
             k: v
             for k, v in {
@@ -117,7 +117,7 @@ class MockCluster:
         }
 
     @property
-    def programs(self) -> dict[tuple[int, int], Optional[dict]]:
+    def programs(self) -> dict[tuple[int, int], dict | None]:
         return {
             id_: seq["program"] if seq is not None else None
             for id_, seq in self.sequences.items()

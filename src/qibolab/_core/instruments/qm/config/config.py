@@ -72,7 +72,7 @@ class Configuration:
     controllers: Controllers = field(default_factory=Controllers)
     octaves: dict[str, Octave] = field(default_factory=dict)
     elements: dict[str, Element] = field(default_factory=dict)
-    pulses: dict[str, Union[QmPulse, QmAcquisition]] = field(default_factory=dict)
+    pulses: dict[str, QmPulse | QmAcquisition] = field(default_factory=dict)
     waveforms: dict[str, Waveform] = field(default_factory=dict)
     digital_waveforms: dict = field(
         default_factory=lambda: DEFAULT_DIGITAL_WAVEFORMS.copy()
@@ -102,11 +102,12 @@ class Configuration:
         if controller.type == "opx1":
             keys = ["offset"]
         else:
-            keys = list(config.model_fields.keys())
+            keys = list(config.model_dump().keys())
             keys.remove("kind")
+            keys.remove("filters")
         config_values = config.model_dump()
         values = {k: config_values[k] for k in keys}
-        values.update({"filter": config.filter})
+        values.update({"filter": config.filter(controller.type)})
         if config.sampling_rate > 1e9:
             del values["upsampling_mode"]
         controller.analog_outputs[channel.port] = values
@@ -154,7 +155,7 @@ class Configuration:
         channel: IqChannel,
         config: IqConfig,
         lo_config: MwFemOscillatorConfig,
-        id: Optional[ChannelId] = None,
+        id: ChannelId | None = None,
     ):
         controller = self.controllers[channel.device]
         if channel.port in controller.analog_outputs:
@@ -174,7 +175,7 @@ class Configuration:
         channel: IqChannel,
         config: IqConfig,
         lo_config: OscillatorConfig,
-        id: Optional[ChannelId] = None,
+        id: ChannelId | None = None,
     ):
         port = channel.port
         octave = self.octaves[channel.device]
@@ -243,7 +244,7 @@ class Configuration:
         pulse: Pulse,
         sampling_rate: int,
         max_voltage: float,
-        element: Optional[str] = None,
+        element: str | None = None,
         dc: bool = False,
     ):
         if dc:
@@ -305,9 +306,9 @@ class Configuration:
         acquisition = f"{op}_{element}"
         if acquisition not in self.pulses:
             new_probe = readout.probe.model_copy(
-                update=dict(
-                    duration=readout.acquisition.duration,
-                    envelope=Custom(
+                update={
+                    "duration": readout.acquisition.duration,
+                    "envelope": Custom(
                         i_=np.pad(
                             readout.probe.envelope.i(int(readout.probe.duration)),
                             (
@@ -333,7 +334,7 @@ class Configuration:
                             constant_values=0,
                         ),
                     ),
-                )
+                }
             )
             self.pulses[acquisition] = self.register_waveforms(
                 new_probe,

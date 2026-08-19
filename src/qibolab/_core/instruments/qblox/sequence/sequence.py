@@ -1,5 +1,5 @@
 from collections.abc import Iterable
-from typing import Annotated, Optional
+from typing import Annotated
 
 import numpy as np
 from pydantic import PlainSerializer, PlainValidator
@@ -24,7 +24,7 @@ from .waveforms import Waveform, WaveformIndex, waveforms
 __all__ = ["Q1Sequence"]
 
 
-def _weight_len(w: Optional[Weight]) -> Optional[int]:
+def _weight_len(w: Weight | None) -> int | None:
     return len(w.data) if w is not None else None
 
 
@@ -72,23 +72,26 @@ class Q1Sequence(Model):
         options: ExecutionParameters,
         sampling_rate: float,
         channel: set[ChannelId],
-        time_of_flight: Optional[float],
         duration: float,
+        merged_vzs: bool,
     ) -> "Q1Sequence":
         padding = (
             duration
             - sum(p.duration if not isinstance(p, Align) else 0 for p in sequence)
         ) * sampling_rate
+        pulse_and_readout_ids = {
+            pulse.id for pulse in sequence if isinstance(pulse, (Pulse, Readout))
+        }
         waveform_specs, indices_map = waveforms(
             sequence,
             sampling_rate,
-            amplitude_swept={
-                p.id for p in swept_pulses(sweepers, {Parameter.amplitude})
-            },
+            amplitude_swept=set(swept_pulses(sweepers, {Parameter.amplitude})),
             duration_swept={
-                k: v
-                for k, v in swept_pulses(sweepers, {Parameter.duration}).items()
-                if isinstance(k, (Pulse, Readout)) and k in sequence
+                pulse_id: sweeper
+                for pulse_id, sweeper in swept_pulses(
+                    sweepers, {Parameter.duration}
+                ).items()
+                if pulse_id in pulse_and_readout_ids
             },
         )
         sequence, sweepers = _apply_sampling_rate(sequence, sweepers, sampling_rate)
@@ -106,8 +109,8 @@ class Q1Sequence(Model):
                 options,
                 sweepers,
                 channel,
-                time_of_flight,
                 int(padding),
+                merged_vzs,
             ),
         )
 
@@ -122,7 +125,7 @@ class Q1Sequence(Model):
         return len(self.program.elements) == 0
 
     @property
-    def integration_lengths(self) -> dict[MeasureId, Optional[int]]:
+    def integration_lengths(self) -> dict[MeasureId, int | None]:
         """Determine the integration lengths fixed by weights.
 
         Returns ``None`` for those acquisitions which are non-weighted, since the length
@@ -153,7 +156,7 @@ def compile(
     sweepers: list[ParallelSweepers],
     options: ExecutionParameters,
     sampling_rate: float,
-    time_of_flights: dict[ChannelId, float],
+    merged_vzs: bool,
 ) -> dict[ChannelId, Q1Sequence]:
     duration = sequence.duration
     sweeper_channels = {ch: [] for ch in swept_channels(sweepers)}
@@ -164,8 +167,8 @@ def compile(
             options,
             sampling_rate,
             _effective_channels(ch, seq),
-            time_of_flights.get(ch),
             duration,
+            merged_vzs,
         )
         for ch, seq in (sweeper_channels | sequence.by_channel).items()
     }
