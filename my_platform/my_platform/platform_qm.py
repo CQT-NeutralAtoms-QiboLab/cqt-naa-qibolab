@@ -1,6 +1,6 @@
 import pathlib
-
-from qibolab import ConfigKinds
+import numpy as np
+from qibolab import ConfigKinds, Parameter, Sweeper
 from qibolab._core.components import AcquisitionChannel, DigitalChannel, IqChannel
 from qibolab._core.instruments.qm import QmController
 from qibolab._core.instruments.qm.components import OpxOutputConfig, QmAcquisitionConfig
@@ -14,7 +14,7 @@ LF_FEM1 = 1    # LF-FEM: col AOD (port 1) + row AOD (port 2) + readout + trigger
 LF_FEM2 = 2    # LF-FEM: spare / additional DC outputs
 
 # Analog output ports on LF_FEM1 (matching reference)
-COL_CHANNEL = 1
+COL_CHANNEL = 3
 ROW_CHANNEL = 2
 
 # Digital (TTL) trigger output ports on LF_FEM1 — must not collide with the
@@ -118,7 +118,7 @@ def build_config(platform: Platform) -> dict:
 if __name__ == "__main__":
     import json
 
-    from qibolab._core.pulses import Pulse, Rectangular
+    from qibolab._core.pulses import Pulse, Rectangular, Gaussian
     from qibolab._core.sequence import PulseSequence
 
     platform = create()
@@ -140,16 +140,28 @@ if __name__ == "__main__":
     # sequence.append(("col_selector_01", col1_pulse))
 
     # Option B: build a fresh Pulse inline
-    col2_pulse = Pulse(
-        duration=800,
+    col2_pulse_a = Pulse(
+        duration=8000,
         amplitude=0.167,
-        envelope=Rectangular(),
-        chirp=(2e6, "Hz/nsec"),
+        envelope=Gaussian(rel_sigma = 0.5),
+        chirp=(200e5, "Hz/nsec"),
     )
-    sequence.append(("col_selector_02", col2_pulse))
+    col2_pulse_b = Pulse(
+        duration=8000,
+        amplitude=0.167,
+        envelope=Gaussian(rel_sigma = 3.0),
+        chirp=(600e5, "Hz/nsec"),
+    )
+    frequency_sweeper = Sweeper(
+        parameter=Parameter.frequency,
+        channels=["col_selector_02"],
+        values=np.linspace(10e6, 20e6, 5),
+    )
+    sequence.append(("col_selector_02", col2_pulse_a))
+    sequence.append(("col_selector_02", col2_pulse_b))
 
     # # Fire them on a few tones in parallel
     # sequence.append(("row_selector_01", platform.parameters.pulses["row_selector_01"]))
 
-    results = platform.execute([sequence], nshots=200, relaxation_time=500_000)
+    results = platform.execute([sequence], [[frequency_sweeper]], nshots=200, relaxation_time=500_000)
     platform.disconnect()

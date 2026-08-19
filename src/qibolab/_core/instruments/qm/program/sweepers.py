@@ -30,7 +30,10 @@ def find_lo_frequencies(
     It also checks if frequency sweep is within the supported instrument
     bandwidth [-400, 400] MHz.
     """
-    lo_freqs = {configs[channel.lo].frequency for _, channel in channels}
+    lo_freqs = {
+        configs[channel.lo].frequency if channel.lo is not None else 0.0
+        for _, channel in channels
+    }
     if len(lo_freqs) > 1:
         raise ValueError(
             "Cannot sweep frequency of channels using different LO using the same `Sweeper` object. Please use parallel sweepers instead."
