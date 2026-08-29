@@ -9,7 +9,7 @@ configuration defined by these classes.
 
 from functools import reduce
 from pathlib import Path
-from typing import Annotated, Literal
+from typing import Annotated, Literal, Union
 
 import numpy as np
 from pydantic import Field
@@ -19,6 +19,7 @@ from .filters import Filter
 
 __all__ = [
     "AcquisitionConfig",
+    "ChannelConfig",
     "DigitalConfig",
     "IqMixerConfig",
     "OscillatorConfig",
@@ -29,6 +30,7 @@ __all__ = [
     "IqMixerConfig",
     "LogConfig",
     "OscillatorConfig",
+    "ToneConfig",
 ]
 
 
@@ -121,6 +123,33 @@ class IqConfig(Config):
     """The sampling rate of the channel."""
 
 
+class ToneConfig(Config):
+    """Configuration for a single-input LF-FEM tone (AOD tweezer tone).
+
+    Unlike :class:`IqConfig` there is no mixer/LO: ``frequency`` is the tone's
+    NCO (intermediate) frequency directly. It also owns the LF-FEM analog-output
+    port knobs (``output_mode``/``upsampling_mode``) so these are a single,
+    explicit decision point rather than inherited defaults.
+    """
+
+    kind: Literal["tone"] = "tone"
+
+    frequency: float
+    """NCO (intermediate) frequency of the tone in Hz (sets the AOD deflection/position)."""
+
+    offset: float = 0.0
+    """DC offset applied to the analog output port, in V."""
+
+    sampling_rate: int = 1_000_000_000
+    """Sampling rate of the analog output port, in samples/s."""
+
+    output_mode: Literal["direct", "amplified"] = "direct"
+    """LF-FEM analog output mode."""
+
+    upsampling_mode: Literal["mw", "pulse"] = "mw"
+    """LF-FEM DAC upsampling mode."""
+
+
 class AcquisitionConfig(Config):
     """Configuration for acquisition channel.
 
@@ -159,5 +188,12 @@ class LogConfig(Config):
 
 
 ChannelConfig = Union[
-    DcConfig, DigitalConfig, IqMixerConfig, OscillatorConfig, IqConfig, AcquisitionConfig, LogConfig
+    DcConfig,
+    DigitalConfig,
+    IqMixerConfig,
+    OscillatorConfig,
+    IqConfig,
+    ToneConfig,
+    AcquisitionConfig,
+    LogConfig,
 ]

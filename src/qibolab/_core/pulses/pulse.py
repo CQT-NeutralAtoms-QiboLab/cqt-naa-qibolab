@@ -1,6 +1,6 @@
 """Pulse class."""
 
-from typing import Annotated, Literal, cast
+from typing import Annotated, Literal, Union, cast
 from uuid import uuid4
 
 import numpy as np

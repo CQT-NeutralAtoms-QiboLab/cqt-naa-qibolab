@@ -10,6 +10,8 @@ from qibolab._core.components import (
     IqChannel,
     IqConfig,
     OscillatorConfig,
+    ToneChannel,
+    ToneConfig,
 )
 from qibolab._core.identifier import ChannelId
 from qibolab._core.pulses import Custom, Pulse, Readout
@@ -115,10 +117,10 @@ class Configuration:
     
 
     def configure_lf_fem_tone_line(
-    self,
-    id: "ChannelId",  
-    channel: "IqChannel", 
-    config: "IqConfig",    
+        self,
+        id: ChannelId,
+        channel: ToneChannel,
+        config: ToneConfig,
     ):
         controller = self.controllers[channel.device]
         if channel.port in controller.analog_outputs:
@@ -136,9 +138,9 @@ class Configuration:
         self,
         id: "ChannelId",  
         acquire_channel: "AcquisitionChannel", 
-        probe_channel: "IqChannel", 
+        probe_channel: ToneChannel,
         acquire_config: "QmAcquisitionConfig",    
-        probe_config: "IqConfig",    
+        probe_config: ToneConfig,
     ):
         controller = self.controllers[acquire_channel.device]
         controller.analog_inputs[acquire_channel.port] = AnalogInput.from_config(acquire_config)

@@ -3,7 +3,7 @@ import numpy.typing as npt
 from qm import qua
 from qm.qua._dsl import _Variable  # for type declaration only
 
-from qibolab._core.components import Channel, Config
+from qibolab._core.components import Channel, Config, ToneChannel
 from qibolab._core.identifier import ChannelId
 from qibolab._core.sweeper import Parameter
 
@@ -30,8 +30,10 @@ def find_lo_frequencies(
     It also checks if frequency sweep is within the supported instrument
     bandwidth [-400, 400] MHz.
     """
+    # A ToneChannel has no LO (single-input LF-FEM tone): its LO frequency is 0.
+    # Any other RF channel carries its LO via ``channel.lo``.
     lo_freqs = {
-        configs[channel.lo].frequency if channel.lo is not None else 0.0
+        0.0 if isinstance(channel, ToneChannel) else configs[channel.lo].frequency
         for _, channel in channels
     }
     if len(lo_freqs) > 1:

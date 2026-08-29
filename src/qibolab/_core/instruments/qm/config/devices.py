@@ -1,7 +1,7 @@
 from dataclasses import dataclass, field
 from typing import Literal
 
-from qibolab._core.components import OscillatorConfig
+from qibolab._core.components import OscillatorConfig, ToneConfig
 
 from ..components import (
     MwFemOscillatorConfig,
@@ -38,6 +38,7 @@ class AnalogInput:
     def from_config(cls, config: QmAcquisitionConfig):
         return cls(offset=config.offset, gain_db=config.gain)
 
+#TODO: ADDRESS HARDCODING IN LfFemOutput
 @dataclass
 class LfFemOutput:
     offset: float = 0.0
@@ -46,16 +47,19 @@ class LfFemOutput:
     upsampling_mode: Literal["mw", "pulse"] = "mw"
 
     @classmethod
-    def from_config(cls, config):
+    def from_config(cls, config: ToneConfig):
+        # Read directly from ToneConfig — the single decision point for the
+        # LF-FEM analog-output port knobs (no getattr fallbacks).
         return cls(
-            offset=getattr(config, "offset", 0.0),
-            sampling_rate=getattr(config, "sampling_rate", 1e9),
-            output_mode=getattr(config, "output_mode", "direct"),
-            upsampling_mode=getattr(config, "upsampling_mode", "mw"),
+            offset=config.offset,
+            sampling_rate=config.sampling_rate,
+            output_mode=config.output_mode,
+            upsampling_mode=config.upsampling_mode,
         )
-    def update(self, config):
-        assert self.sampling_rate == getattr(config, "sampling_rate", 1e9)
-        assert self.output_mode == getattr(config, "output_mode", "direct")
+
+    def update(self, config: ToneConfig):
+        assert self.sampling_rate == config.sampling_rate
+        assert self.output_mode == config.output_mode
 
 @dataclass
 class MwFemOutput:

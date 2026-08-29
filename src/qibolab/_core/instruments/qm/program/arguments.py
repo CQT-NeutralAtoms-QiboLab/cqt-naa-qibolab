@@ -1,6 +1,6 @@
 from collections import defaultdict
 from dataclasses import dataclass, field
-from typing import Literal, Optional, Union
+from typing import Literal, Optional
 
 from qm.qua._dsl import _Variable  # for type declaration only
 

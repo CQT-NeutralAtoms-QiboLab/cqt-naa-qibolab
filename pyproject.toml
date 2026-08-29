@@ -25,6 +25,7 @@ python = ">=3.10,<3.14"
 numpy = ">=1.26.4,<3"
 scipy = "^1.13.0"
 pydantic = "^2.4.0"
+qm-qua = "^1.4.1"  # Quantum Machines QUA SDK — required by the QM driver that powers the NAA platform
 qibo = { version = "^0.3.0", optional = true }
 qutip = { version = "^5.0.2", optional = true }
 dynamiqs = { version = "^0.3.4", optional = true }

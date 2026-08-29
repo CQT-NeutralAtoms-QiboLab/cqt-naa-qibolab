@@ -18,10 +18,19 @@ make sure that there is only one copy of configuration for a component, plus use
 share a component, because channels will refer to the same name for the component under discussion.
 """
 
+from typing import Optional
+
 from ..identifier import ChannelId
 from ..serialize import Model
 
-__all__ = ["Channel", "DcChannel", "IqChannel", "AcquisitionChannel", "DigitalChannel"]
+__all__ = [
+    "Channel",
+    "DcChannel",
+    "IqChannel",
+    "ToneChannel",
+    "AcquisitionChannel",
+    "DigitalChannel",
+]
 
 
 class Channel(Model):
@@ -74,9 +83,27 @@ class IqChannel(Channel):
     """
     core: Optional[str] = None
     """Name of the core component corresponding to this channel.
-    
+
     None, if the channel does not have a core, or it is not configurable.
     """
+
+
+class ToneChannel(Channel):
+    """Channel for a single-input AOD tweezer tone (LF-FEM baseband).
+
+    A tone is a real sinusoid synthesized directly by the DAC's NCO — it has NO
+    IQ mixer and NO local oscillator (unlike :class:`IqChannel`), and unlike
+    :class:`DcChannel` it carries an intermediate (NCO) frequency, held in its
+    ``ToneConfig``. Multiple tones may share one physical port (``path``) and are
+    separated by frequency; ``core`` assigns each to its own QM real-time thread.
+    """
+
+    core: Optional[str] = None
+    """Name of the QM real-time core/thread for this tone.
+
+    None, if the channel does not have a core, or it is not configurable.
+    """
+
 
 class AcquisitionChannel(Channel):
     twpa_pump: str | None = None
