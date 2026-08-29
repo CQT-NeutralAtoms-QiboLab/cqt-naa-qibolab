@@ -5,6 +5,7 @@ from collections import defaultdict
 from dataclasses import asdict, dataclass
 from os import PathLike
 from pathlib import Path
+from typing import Union
 
 from pydantic import Field
 from qm import QmPendingJob, QuantumMachine, QuantumMachinesManager, generate_qua_script
@@ -19,6 +20,8 @@ from qibolab._core.components import (
     IqChannel,
     IqConfig,
     OscillatorConfig,
+    ToneChannel,
+    ToneConfig,
 )
 from qibolab._core.execution_parameters import ExecutionParameters
 from qibolab._core.identifier import ChannelId
@@ -382,32 +385,36 @@ class QmController(Controller):
         elif isinstance(ch, DigitalChannel):
             self.config.configure_digital_line(channel, ch)
 
+        elif isinstance(ch, ToneChannel):
+            assert isinstance(config, ToneConfig)
+            # LF-FEM baseband tone: NCO frequency is set directly, no external LO.
+            self.config.configure_lf_fem_tone_line(channel, ch, config)
+
         elif isinstance(ch, IqChannel):
             assert isinstance(config, IqConfig)
-            if ch.lo is None:
-                # LF-FEM: no external LO, frequency is set directly as the NCO frequency
-                self.config.configure_lf_fem_tone_line(channel, ch, config)
+            assert ch.lo is not None
+            lo_config = configs[ch.lo]
+            assert isinstance(lo_config, OscillatorConfig)
+            if isinstance(lo_config, MwFemOscillatorConfig):
+                self.config.configure_mw_fem_line(ch, config, lo_config, channel)
             else:
-                lo_config = configs[ch.lo]
-                assert isinstance(lo_config, OscillatorConfig)
-                if isinstance(lo_config, MwFemOscillatorConfig):
-                    self.config.configure_mw_fem_line(ch, config, lo_config, channel)
-                else:
-                    self.config.configure_iq_line(ch, config, lo_config, channel)
+                self.config.configure_iq_line(ch, config, lo_config, channel)
 
         elif isinstance(ch, AcquisitionChannel):
             assert ch.probe is not None
             assert isinstance(config, QmAcquisitionConfig)
             probe = self.channels[ch.probe]
             probe_config = configs[ch.probe]
-            assert isinstance(probe, IqChannel)
-            assert isinstance(probe_config, IqConfig)
-            if probe.lo is None:
-                # LF-FEM: no external LO, bare analog input/output
+            if isinstance(probe, ToneChannel):
+                # LF-FEM: single-input tone probe, no external LO.
+                assert isinstance(probe_config, ToneConfig)
                 self.config.configure_lf_fem_acquire_line(
                     channel, ch, probe, config, probe_config
                 )
             else:
+                assert isinstance(probe, IqChannel)
+                assert isinstance(probe_config, IqConfig)
+                assert probe.lo is not None
                 lo_config = configs[probe.lo]
                 assert isinstance(lo_config, OscillatorConfig)
                 if isinstance(lo_config, MwFemOscillatorConfig):
@@ -469,15 +476,22 @@ class QmController(Controller):
         if isinstance(ch, DigitalChannel):
             assert isinstance(pulse, Ttl)
             return self.config.register_digital_pulse(channel, pulse)
+        if isinstance(ch, ToneChannel):
+            assert isinstance(pulse, Pulse)
+            # LF-FEM baseband tone: single real waveform (dc=True), no I/Q pair.
+            return self.config.register_iq_pulse(
+                channel, pulse, sampling_rate, max_voltage, dc=True
+            )
         if isinstance(ch, IqChannel):
             assert isinstance(pulse, Pulse)
+            # Real IQ channel (mixer + LO): emits an I/Q pair, not single-input.
             return self.config.register_iq_pulse(
-                channel, pulse, sampling_rate, max_voltage, dc=ch.lo is None
+                channel, pulse, sampling_rate, max_voltage, dc=False
             )
         assert isinstance(pulse, Readout)
         probe = self.channels[ch.probe]
         return self.config.register_acquisition_pulse(
-            channel, pulse, sampling_rate, max_voltage, dc=probe.lo is None
+            channel, pulse, sampling_rate, max_voltage, dc=isinstance(probe, ToneChannel)
         )
 
     def register_pulses(self, configs: dict[str, Config], sequence: PulseSequence):
@@ -583,7 +597,7 @@ class QmController(Controller):
             max_voltage = channel_max_voltage(configs[probe_id])
             sampling_rate = channel_sampling_rate(configs[probe_id])
             op = self.config.register_acquisition_pulse(
-                channel_id, readout, sampling_rate, max_voltage, dc=probe.lo is None
+                channel_id, readout, sampling_rate, max_voltage, dc=isinstance(probe, ToneChannel)
             )
 
             acq_config = configs[channel_id]

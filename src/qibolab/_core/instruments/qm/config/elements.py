@@ -3,7 +3,7 @@ from typing import Optional, Union
 
 from typing_extensions import TypedDict
 
-from qibolab._core.components import Channel
+from qibolab._core.components import Channel, ToneChannel
 
 __all__ = [
     "DcElement",
@@ -158,12 +158,12 @@ class LfFemToneElement:
     core: Optional[str] = None
  
     @classmethod
-    def from_channel(cls, channel, intermediate_frequency: int):
-        port = _to_port(channel) 
+    def from_channel(cls, channel: ToneChannel, intermediate_frequency: int):
+        port = _to_port(channel)
         return cls(
             singleInput=port,
             intermediate_frequency=int(intermediate_frequency),
-            core=getattr(channel, "core", None)
+            core=getattr(channel, "core", None),
         )
 
 @dataclass

@@ -136,6 +136,7 @@ data/
 
 # Debugging & Testing
 debug/
+claude_testing/
 
 # Nix
 .devenv
