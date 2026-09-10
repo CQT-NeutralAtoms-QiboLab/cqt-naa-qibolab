@@ -25,22 +25,43 @@ os.environ["QIBOLAB_PLATFORMS"] = str(_PLATFORMS)
 import numpy as np
 
 from qibolab import create_platform
-from qibolab._core.pulses import Gaussian, Pulse
 from qibolab._core.sequence import PulseSequence
-from qibolab._core.sweeper import Parameter, Sweeper
 
 # 1) load the platform
 platform = create_platform("naa")
 print(f"loaded platform '{platform.name}'")
 
-# 2) build a sequence: a chirped Gaussian on column tone 02
+# 2) build a sequence: all 8 col + 8 row tones playing simultaneously, each
+# optionally chirped at its own rate (Hz/nsec). Omit a channel here (or set its
+# rate to None) to play it unchirped at its base frequency.
+CHIRP_RATES = {
+    "col_selector_01": 50_000,
+    "col_selector_02": -50_000,
+    "col_selector_03": 30_000,
+    "col_selector_04": -30_000,
+    "col_selector_05": 20_000,
+    "col_selector_06": -20_000,
+    "col_selector_07": 10_000,
+    "col_selector_08": -10_000,
+    "row_selector_01": 40_000,
+    "row_selector_02": -40_000,
+    "row_selector_03": 25_000,
+    "row_selector_04": -25_000,
+    "row_selector_05": 15_000,
+    "row_selector_06": -15_000,
+    "row_selector_07": 5_000,
+    "row_selector_08": -5_000,
+}
+
 sequence = PulseSequence()
-sequence.append(("col_selector_02", Pulse(
-    duration=8000,
-    amplitude=0.167,
-    envelope=Gaussian(rel_sigma=0.5),
-    chirp=(200e5, "Hz/nsec"),
-)))
+for i in range(1, 9):
+    for axis in ("col", "row"):
+        channel = f"{axis}_selector_{i:02d}"
+        pulse = platform.parameters.pulses[channel]
+        rate = CHIRP_RATES.get(channel)
+        if rate is not None:
+            pulse = pulse.model_copy(update={"chirp": (rate, "Hz/nsec")})
+        sequence.append((channel, pulse))
 
 # NOTE: this sequence only DRIVES tones; it contains no acquisition, so there is
 # nothing to read back. To get data, add a readout on an acquisition channel, e.g.
@@ -50,18 +71,18 @@ sequence.append(("col_selector_02", Pulse(
 #       acquisition=Acquisition(duration=172))))
 
 # 3) frequency sweep that starts at the tone's base frequency
-base = platform.parameters.configs["col_selector_02"].frequency
-sweeper = Sweeper(
-    parameter=Parameter.frequency,
-    channels=["col_selector_02"],
-    values=np.linspace(base, base + 10e6, 5),
-)
+# base = platform.parameters.configs["col_selector_02"].frequency
+# sweeper = Sweeper(
+#     parameter=Parameter.frequency,
+#     channels=["col_selector_02"],
+#     values=np.linspace(base, base + 10e6, 5),
+# )
 
 # 4) connect to the OPX1000, execute on hardware, then always disconnect
 platform.connect()
 try:
     results = platform.execute(
-        [sequence], [[sweeper]], nshots=100, relaxation_time=1000
+        [sequence], nshots=100, relaxation_time=1000
     )
     if results:
         print("execute() returned results for acquisitions:", list(results.keys()))
