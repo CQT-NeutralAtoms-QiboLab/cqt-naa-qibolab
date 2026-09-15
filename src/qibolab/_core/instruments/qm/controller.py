@@ -292,6 +292,15 @@ class QmController(Controller):
     experiment: Experiment | None = None
     cache: Cache | None = None
 
+    _open_machine: QuantumMachine | None = None
+    """Currently open ``QuantumMachine`` on :attr:`manager`, if any.
+
+    Tracked together with :attr:`_open_config` to implement the "match-or-reopen"
+    policy shared by :meth:`play` and :meth:`execute_raw_qua`.
+    """
+    _open_config: dict | None = None
+    """QUA config dict that :attr:`_open_machine` was opened with."""
+
     simulation_duration: int | None = None
     """Duration for the simulation in ns.
 
@@ -358,6 +367,54 @@ class QmController(Controller):
             if not self.keep_dc_offsets_on:
                 self.manager.close_all_quantum_machines()
             self.manager = None
+        # Drop references to whatever machine was open on the (now gone) manager.
+        self._open_machine = None
+        self._open_config = None
+
+    def _ensure_machine(self, config: dict) -> QuantumMachine:
+        """Return an open ``QuantumMachine`` for ``config`` (match-or-reopen).
+
+        Reuses the machine already open on :attr:`manager` when it was opened with
+        an equal config; otherwise closes all machines and opens a fresh one. This
+        single policy serves both the compiled-sequence path (:meth:`play`) and the
+        raw-program path (:meth:`execute_raw_qua`): while their configs differ the
+        machine is reopened on each switch, and once a single (super)set config is
+        shared it is opened once and reused for the whole connected session.
+        """
+        if self.manager is None:
+            raise RuntimeError("Not connected to Quantum Machines; call connect() first.")
+        if self._open_machine is not None and self._open_config == config:
+            return self._open_machine
+        machine = self.manager.open_qm(config, close_other_machines=True)
+        self._open_machine = machine
+        self._open_config = config
+        return machine
+
+    def execute_raw_qua(self, program, config: dict | None = None):
+        """Execute a pre-built raw QUA program over the existing connection.
+
+        Bypasses the ``PulseSequence`` -> QUA compilation done by :meth:`play`:
+        the program is handed to the QM as-is and run on the manager opened by
+        :meth:`connect`, following the match-or-reopen policy in
+        :meth:`_ensure_machine`.
+
+        :param program: a QUA program object (``with program() as ...``).
+        :param config: the QUA config dict the program is paired with. When
+            ``None``, the controller's own generated config is used
+            (``self.config.asdict()``) — the intended path once a superset config
+            covers the raw program too.
+        :returns: the running ``QmJob``. Its result streams are defined by the raw
+            program itself (not registered as qibolab acquisitions), so the caller
+            fetches them via ``job.result_handles``.
+        """
+        if self.manager is None:
+            raise RuntimeError(
+                "Not connected to Quantum Machines; call platform.connect() "
+                "before execute_raw_qua()."
+            )
+        config = self.config.asdict() if config is None else config
+        machine = self._ensure_machine(config)
+        return machine.execute(program)
 
     def configure_device(self, device: str):
         """Add device in the ``config``."""
@@ -700,7 +757,7 @@ class QmController(Controller):
                     )
                     return {"program": qua_program, "config": self.config.asdict()}
 
-                machine = self.manager.open_qm(self.config.asdict())
+                machine = self._ensure_machine(self.config.asdict())
                 program_id = machine.compile(qua_program)
                 self.cache = Cache(
                     machine=machine, program_id=program_id, acquisitions=acquisitions
