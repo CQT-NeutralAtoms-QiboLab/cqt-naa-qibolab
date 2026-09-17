@@ -1,3 +1,4 @@
+import copy
 import shutil
 import tempfile
 import warnings
@@ -301,6 +302,26 @@ class QmController(Controller):
     _open_config: dict | None = None
     """QUA config dict that :attr:`_open_machine` was opened with."""
 
+    superset_config: dict | None = None
+    """Platform-owned superset QUA config (layout + the sorting engine's operations/
+    pulses/waveforms), set once at platform build time.
+
+    When set, it is the single source of truth for the layout used by both the
+    compiled-sequence path (:meth:`play`) and the raw-program path
+    (:meth:`execute_raw_qua`): every command runs against a config that contains it,
+    so the layout is never stripped. When ``None`` the controller behaves exactly as
+    upstream (unaffected non-NAA platforms).
+    """
+    last_config: dict | None = None
+    """The QUA config dict the most recent command generated and ran against.
+
+    Exposed so a caller can inspect it, save it, or feed it back as the base of a
+    later command (see :meth:`execute_raw_qua`'s ``config`` argument)."""
+    _superset_obj: Configuration | None = None
+    """Golden superset :class:`Configuration` (built once from
+    :attr:`superset_config`), deep-copied per command so ``play`` fills a fresh copy
+    without ever mutating or stripping the shared layout."""
+
     simulation_duration: int | None = None
     """Duration for the simulation in ns.
 
@@ -371,38 +392,95 @@ class QmController(Controller):
         self._open_machine = None
         self._open_config = None
 
-    def _ensure_machine(self, config: dict) -> QuantumMachine:
-        """Return an open ``QuantumMachine`` for ``config`` (match-or-reopen).
+    @staticmethod
+    def _config_covers(base: dict | None, incoming: dict) -> bool:
+        """True if ``base`` can run anything compiled against ``incoming``.
 
-        Reuses the machine already open on :attr:`manager` when it was opened with
-        an equal config; otherwise closes all machines and opens a fresh one. This
-        single policy serves both the compiled-sequence path (:meth:`play`) and the
-        raw-program path (:meth:`execute_raw_qua`): while their configs differ the
-        machine is reopened on each switch, and once a single (super)set config is
-        shared it is opened once and reused for the whole connected session.
+        Structural coverage: every element in ``incoming`` (and each of its
+        operations) and every ``pulses`` / ``waveforms`` / ``integration_weights``
+        entry it names is present in ``base``. Used to decide machine reuse.
+        """
+        if base is None:
+            return False
+        base_elements = base.get("elements", {})
+        for name, elem in incoming.get("elements", {}).items():
+            base_elem = base_elements.get(name)
+            if base_elem is None:
+                return False
+            if not set(elem.get("operations", {})) <= set(
+                base_elem.get("operations", {})
+            ):
+                return False
+        for section in ("pulses", "waveforms", "integration_weights"):
+            if not set(incoming.get(section, {})) <= set(base.get(section, {})):
+                return False
+        return True
+
+    def _ensure_machine(self, config: dict) -> QuantumMachine:
+        """Return an open ``QuantumMachine`` able to run ``config`` (reuse-or-reopen).
+
+        The machine already open on :attr:`manager` is reused when its config
+        *covers* ``config`` (see :meth:`_config_covers`) — it already declares every
+        element/operation/pulse the incoming config needs; otherwise all machines are
+        closed and a fresh one is opened. With a shared superset the open machine
+        covers every command, so a whole ``connect -> execute -> execute_raw_qua``
+        session stays on one machine; a reopen happens only when a command genuinely
+        needs something the open machine lacks.
         """
         if self.manager is None:
             raise RuntimeError("Not connected to Quantum Machines; call connect() first.")
-        if self._open_machine is not None and self._open_config == config:
+        if self._open_machine is not None and self._config_covers(
+            self._open_config, config
+        ):
             return self._open_machine
         machine = self.manager.open_qm(config, close_other_machines=True)
         self._open_machine = machine
         self._open_config = config
         return machine
 
+    def _build_superset_obj(self, configs: dict[str, Config]) -> Configuration:
+        """Build the golden superset :class:`Configuration` from :attr:`superset_config`.
+
+        Constructs the platform layout with the normal channel-configuration path (in
+        an isolated ``Configuration`` so the live one is untouched) and injects the
+        sorting engine's operations/pulses/waveforms from :attr:`superset_config` onto
+        it. Called once; :meth:`play` deep-copies the result per command so it fills a
+        fresh copy without ever mutating or stripping the shared layout.
+        """
+        assert self.superset_config is not None
+        cfg = Configuration()
+        saved = self.config
+        self.config = cfg
+        try:
+            for id in self.channels:
+                if id in configs:
+                    self.configure_channel(id, configs)
+        finally:
+            self.config = saved
+        sc = self.superset_config
+        sc_elements = sc.get("elements", {})
+        for name, element in cfg.elements.items():
+            element.operations.update(sc_elements.get(name, {}).get("operations", {}))
+        for section in ("pulses", "waveforms", "integration_weights", "digital_waveforms"):
+            target = getattr(cfg, section)
+            for key, value in sc.get(section, {}).items():
+                target.setdefault(key, copy.deepcopy(value))
+        return cfg
+
     def execute_raw_qua(self, program, config: dict | None = None):
         """Execute a pre-built raw QUA program over the existing connection.
 
         Bypasses the ``PulseSequence`` -> QUA compilation done by :meth:`play`:
         the program is handed to the QM as-is and run on the manager opened by
-        :meth:`connect`, following the match-or-reopen policy in
+        :meth:`connect`, following the reuse-or-reopen policy in
         :meth:`_ensure_machine`.
 
         :param program: a QUA program object (``with program() as ...``).
-        :param config: the QUA config dict the program is paired with. When
-            ``None``, the controller's own generated config is used
-            (``self.config.asdict()``) — the intended path once a superset config
-            covers the raw program too.
+        :param config: the QUA config dict the program is paired with. When ``None``,
+            the platform-owned :attr:`superset_config` is used (falling back to the
+            controller's own generated config if no superset is set). Pass an explicit
+            config to run against a specific one (e.g. a config a previous command
+            generated, available as :attr:`last_config`).
         :returns: the running ``QmJob``. Its result streams are defined by the raw
             program itself (not registered as qibolab acquisitions), so the caller
             fetches them via ``job.result_handles``.
@@ -412,7 +490,13 @@ class QmController(Controller):
                 "Not connected to Quantum Machines; call platform.connect() "
                 "before execute_raw_qua()."
             )
-        config = self.config.asdict() if config is None else config
+        if config is None:
+            config = (
+                self.superset_config
+                if self.superset_config is not None
+                else self.config.asdict()
+            )
+        self.last_config = config
         machine = self._ensure_machine(config)
         return machine.execute(program)
 
@@ -730,13 +814,28 @@ class QmController(Controller):
             )
 
             if True:  # TODO: new_experiment != self.experiment or self.manager is None:
-                # register DC elements so that all qubits are
-                # sweetspot even when they are not used
-                for id, channel in self.channels.items():
-                    if isinstance(channel, DcChannel):
-                        self.configure_channel(id, configs)
+                if self.superset_config is not None:
+                    # NAA: start each command from a fresh copy of the golden superset
+                    # (platform layout + the sorting operations). Elements are never
+                    # re-created or stripped; only the current sequence's pulses are
+                    # added on top, so ``self.config`` always contains the superset.
+                    if self._superset_obj is None:
+                        self._superset_obj = self._build_superset_obj(configs)
+                    self.config = copy.deepcopy(self._superset_obj)
+                    probe_map = {
+                        channel.probe: id
+                        for id, channel in self.channels.items()
+                        if isinstance(channel, AcquisitionChannel)
+                        and channel.probe is not None
+                    }
+                else:
+                    # register DC elements so that all qubits are
+                    # sweetspot even when they are not used
+                    for id, channel in self.channels.items():
+                        if isinstance(channel, DcChannel):
+                            self.configure_channel(id, configs)
+                    probe_map = self.configure_channels(configs, sequence.channels)
 
-                probe_map = self.configure_channels(configs, sequence.channels)
                 self.register_pulses(configs, sequence)
                 acquisitions = self.register_acquisitions(configs, sequence, options)
 
@@ -751,13 +850,14 @@ class QmController(Controller):
                     with open(self.script_file_name, "w") as file:
                         file.write(script)
 
+                self.last_config = self.config.asdict()
                 if self.manager is None:
                     warnings.warn(
                         "Not connected to Quantum Machines. Returning program and config."
                     )
-                    return {"program": qua_program, "config": self.config.asdict()}
+                    return {"program": qua_program, "config": self.last_config}
 
-                machine = self._ensure_machine(self.config.asdict())
+                machine = self._ensure_machine(self.last_config)
                 program_id = machine.compile(qua_program)
                 self.cache = Cache(
                     machine=machine, program_id=program_id, acquisitions=acquisitions
