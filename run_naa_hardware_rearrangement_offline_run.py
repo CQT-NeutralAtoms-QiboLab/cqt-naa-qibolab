@@ -40,14 +40,14 @@ controller = ops._get_qm_controller(platform)
 print(f"loaded platform '{platform.name}'")
 print(f"superset_config set at build: {controller.superset_config is not None}")
 
-# 2) build the rearrangement program + context (no connection, no hardware)
+# 2) build the selected rearrangement program + context (no connection, no hardware)
 cfg, pack = ops._load_qm_sorting()
-col_names, row_name, det_name = ops._platform_element_names(controller)
+col_names, row_names, det_name = ops._platform_element_names(controller)
 program, context = ops.build_qm_sorting_program(
     cfg,
     pack,
     col_element_names=col_names,
-    row_element_name=row_name,
+    row_element_names=row_names,
     detector_element_name=det_name,
     seed=SEED,
 )

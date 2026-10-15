@@ -9,7 +9,7 @@ network (the address lives in ``naa/platform.py``).
 Run (from the fork's environment, e.g. after
 `source ../.venv-cqt-naa-qibolab/bin/activate`):
 
-    python run_naa_hardware.py
+    python run_naa_hardware_rearrangement.py
 
 Assumes `cqt-naa-qibolab` and `qibolab_platforms_naa` are sibling directories.
 """
@@ -28,11 +28,9 @@ import numpy as np
 from qibolab import create_platform
 from platform_operations import _load_qm_sorting, rearrange_atoms
 
-# Post-processing helpers from the sorting pack (occupation reconstruction, the
-# occupation-matrix figure, and the text printer).
+# Common post-processing helpers from whichever sorter _BUILDER_FILE selects.
 _cfg, _pack = _load_qm_sorting()
 nb_of_cols = _cfg.nb_of_cols
-reconstruct_final_occupation = _pack.reconstruct_final_occupation
 atom_occupation_matrix = _pack.atom_occupation_matrix
 plot_atom_occupation_matrix = _pack.plot_atom_occupation_matrix
 print_2d = _pack.print_2d
@@ -67,12 +65,19 @@ try:
     res.wait_for_all_values()
     data = res.get("data").fetch_all()["value"]
     count = res.get("count").fetch_all()["value"]
-    raw = res.get("raw_data").fetch_all()["value"]
-
-    # 5) reconstruct the final occupation grid from the moves
-    atom_occupation = reconstruct_final_occupation(
-        data, count, context["atom_initial_occupation"], nb_of_cols
+    raw = (
+        res.get("raw_data").fetch_all()["value"]
+        if context["raw_adc_acquisition"]
+        else None
     )
+
+    # 5) reconstruct through the common 07/08 result contract.
+    reconstructed = _pack.reconstruct_platform_result(
+        data=data,
+        count=count,
+        context=context,
+    )
+    atom_occupation = reconstructed["atom_final_occupation"]
 
     # 6a) text: initial / target / final occupation grids (0 = empty, 1 = atom)
     print("Initial occupation:")
@@ -81,6 +86,9 @@ try:
     print_2d(context["atom_target_occupation"])
     print("Final occupation:")
     print_2d(atom_occupation)
+    if reconstructed["atom_intermediate_occupation"] is not None:
+        print("Intermediate occupation (after BTC balance phase):")
+        print_2d(reconstructed["atom_intermediate_occupation"])
 
     # 6b) image: initial / target / current occupation matrices
     occ = dict(
@@ -99,15 +107,8 @@ try:
     print(f"Saved occupation-matrix image to {image_path}")
     plt.show()  # uncomment for an interactive window instead of (or besides) the file
 
-    # --- (optional) spectrograms from the raw ADC traces ---
-    #   _pack.plot_atom_sorting_results(
-    #       raw,
-    #       column_IFs=_cfg.column_IFs[:nb_of_cols], column_spacing=_cfg.column_spacing,
-    #       atom_initial_occupation=context["atom_initial_occupation"],
-    #       atom_target_occupation=context["atom_target_occupation"],
-    #       atom_final_occupation=atom_occupation,
-    #       target_frequencies_full_python=context["target_frequencies_full_python"],
-    #       nb_of_rows=len(context["atom_initial_occupation"]), nb_of_cols=nb_of_cols)
-    #   plt.show()
+    # Raw ADC is a legacy transport diagnostic, not an occupation measurement.
+    # To collect it explicitly, call rearrange_atoms(..., raw_adc_acquisition=True)
+    # and inspect ``raw`` with sorter-specific diagnostic plotting helpers.
 finally:
     platform.disconnect()

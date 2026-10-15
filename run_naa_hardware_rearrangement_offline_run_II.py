@@ -70,6 +70,7 @@ controller.execute_raw_qua = _offline_execute_raw_qua
 # 3) run the REAL command. Its first step is sync_cfg_from_platform(platform); the
 #    final execute is our offline stub.
 job, context = ops.rearrange_atoms(platform, seed=SEED)
+print(f"selected sorter: {context['sorter']}")
 
 # Show the pack's layout AFTER sync (now reconciled to the platform's channels).
 print(
