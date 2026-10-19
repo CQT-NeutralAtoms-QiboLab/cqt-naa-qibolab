@@ -12,8 +12,11 @@ offline we replace ONLY that final execute step with a stub that validates the p
 against the superset config (``generate_qua_script``) and returns a placeholder job.
 Everything before it — the sync and the program build — runs for real.
 
-It CANNOT show the FINAL occupation (that needs a real run's result streams). For the
-full rearrangement run ``run_naa_hardware_rearrangement.py`` on the machine.
+For BTC, the runner also saves the Python planner's intermediate and final predicted
+occupations. These predictions exercise the same inputs used to build the QUA
+program, but they are not OPX result streams and therefore do not prove that the QUA
+program or physical atom transport produced the predicted result. For the measured
+rearrangement result, run ``run_naa_hardware_rearrangement.py`` on the machine.
 
 Run:  python run_naa_hardware_rearrangement_offline_run_II.py
 """
@@ -71,6 +74,11 @@ controller.execute_raw_qua = _offline_execute_raw_qua
 #    final execute is our offline stub.
 job, context = ops.rearrange_atoms(platform, seed=SEED)
 print(f"selected sorter: {context['sorter']}")
+if context.get("sorter") != "btc" or "plan" not in context:
+    raise RuntimeError(
+        "This offline predicted-result figure requires the BTC 08 sorter. "
+        "Set _BUILDER_FILE to 08_atom_btc_sorting.py."
+    )
 
 # Show the pack's layout AFTER sync (now reconciled to the platform's channels).
 print(
@@ -80,26 +88,46 @@ print(
 )
 print(f"col_AOD_1 port in cfg.config: {cfg.config['elements']['col_AOD_1']['singleInput']['port']}")
 
-# 4) text: initial and target occupation grids (0 = empty, 1 = atom).
-#    The FINAL grid is intentionally absent — it needs a real run on the OPX.
-print("\nInitial occupation:")
-pack.print_2d(context["atom_initial_occupation"])
-print("Target occupation:")
+# 4) text: the BTC Python planner's inputs and predicted phase results.
+plan = context["plan"]
+print("\nTarget occupation:")
 pack.print_2d(context["atom_target_occupation"])
+print("Initial occupation:")
+pack.print_2d(context["atom_initial_occupation"])
+print("Predicted occupation after balance:")
+pack.print_2d(plan["atom_intermediate_occupation"])
+print("Predicted final occupation:")
+pack.print_2d(plan["atom_final_occupation"])
 
-# 5) image: initial and target occupation matrices (two panels; no final offline)
+# 5) image: requested BTC summary order. ``current`` preserves the established
+#    colour encoding that distinguishes surplus atoms outside the target.
 plt = pack.plt
-fig, axes = plt.subplots(1, 2, figsize=(10, 5))
-pack.plot_atom_occupation_matrix(
-    np.asarray(context["atom_initial_occupation"]), ax=axes[0], title="Initial"
+predicted_current = pack.atom_occupation_matrix(
+    "current",
+    atom_initial_occupation=context["atom_initial_occupation"],
+    atom_target_occupation=context["atom_target_occupation"],
+    atom_final_occupation=np.minimum(
+        np.asarray(plan["atom_final_occupation"]),
+        1,
+    ),
 )
-pack.plot_atom_occupation_matrix(
-    np.asarray(context["atom_target_occupation"]), ax=axes[1], title="Target"
+panels = (
+    ("Target", context["atom_target_occupation"]),
+    ("Initial", context["atom_initial_occupation"]),
+    ("After balance", plan["atom_intermediate_occupation"]),
+    ("Predicted Final", predicted_current),
 )
+fig, axes = plt.subplots(1, len(panels), figsize=(20, 5))
+for ax, (title, occupation) in zip(np.atleast_1d(axes).ravel(), panels):
+    pack.plot_atom_occupation_matrix(
+        np.asarray(occupation),
+        ax=ax,
+        title=title,
+    )
 fig.tight_layout()
-image_path = cfg.save_dir / "rearrangement_offline_II_initial_target.png"
+image_path = cfg.save_dir / "rearrangement_offline_II_initial_target_predicted.png"
 fig.savefig(image_path, dpi=150)
-print(f"\nSaved initial/target image to {image_path}")
+print(f"\nSaved BTC predicted-result image to {image_path}")
 
 # 6) confirm the superset assembles (grammar check only, NOT a QOP compile). The stub
 #    already ran generate_qua_script; report its size and the distinct cores.
@@ -113,4 +141,7 @@ print(
     f"superset assembles (via rearrange_atoms): generate_qua_script OK "
     f"({len(text.splitlines())} lines); distinct cores = {len(cores)} (LF-FEM budget 16)"
 )
-print("\nOffline dry-run (through sync) done. Final occupation requires a real run on the OPX.")
+print(
+    "\nOffline dry-run (through sync) done. The displayed final occupation is "
+    "Python-predicted; a measured result requires a real OPX run."
+)
