@@ -31,7 +31,10 @@ Documentation = "https://qibo.science/docs/qibolab/stable"
 backend = ["qibo>=0.3.0,<0.4.0"]
 emulator = ["qutip>=5.0.2,<6.0.0", "dynamiqs>=0.3.4,<0.4.0"]
 qrng = ["pyserial>=3.5.0,<4.0.0"]
-qm = ["qm-qua>=1.4.1,<2.0.0"]  # Quantum Machines QUA SDK — powers the QM driver (install via the "qm" extra)
+qm = [
+  "qm-qua>=1.4.1,<2.0.0",       # Quantum Machines QUA SDK — powers the QM driver
+  "qualang-tools>=0.16.0,<1.0.0",  # QM helper utilities used by the NAA sorting engine (operations/qm_sorting)
+]  # install via the "qm" extra
 
 [dependency-groups]
 dev = [

@@ -72,3 +72,4 @@ try:
               "(add a readout on 'detector'/'loopback' to get data).")
 finally:
     platform.disconnect()
+
